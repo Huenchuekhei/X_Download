@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.bak
+*.bak-*
+*.log
+*.sqlite3
+*.tmp
+cookies.txt
+x_cookies.txt
+twitter_cookies.txt
+.xdl/
+.env
