@@ -14,8 +14,8 @@
   let lockTimer = null;
   let busy = false;
 
-  const EYE_OPEN = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-  const EYE_OFF = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.77 21.77 0 0 1 5.06-6.94"/><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.78 21.78 0 0 1-3.17 4.73"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  const EYE_OPEN = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const EYE_OFF = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.77 21.77 0 0 1 5.06-6.94"/><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.78 21.78 0 0 1-3.17 4.73"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 
   function showError(msg) {
     if (!msg) {
@@ -124,9 +124,9 @@
   async function bootstrap() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("expired") === "1") {
-      showNotice("登录状态已过期或已在其他设备注销，请重新登录。", "warn");
+      showNotice("登录状态已过期或已在其他设备注销，请重新登录", "warn");
     } else if (params.get("logged_out") === "1") {
-      showNotice("已安全退出当前会话。", "info");
+      showNotice("已安全退出当前会话", "info");
     }
 
     try {
