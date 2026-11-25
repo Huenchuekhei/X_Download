@@ -54,7 +54,16 @@ if sys.platform == "win32":
 # 常量
 # ============================================================
 
-DEFAULT_OUTPUT_DIR = str(Path.home() / "OneDrive" / "文档" / "XDL")
+def _default_output_dir() -> str:
+    env_dir = os.environ.get("XDL_OUTPUT_DIR", "").strip()
+    if env_dir:
+        return env_dir
+    if sys.platform != "win32":
+        return str(Path(__file__).resolve().parent / "downloads")
+    return str(Path.home() / "OneDrive" / "文档" / "XDL")
+
+
+DEFAULT_OUTPUT_DIR = _default_output_dir()
 DEFAULT_PROXY = "socks5h://127.0.0.1:7890"
 DEFAULT_PROXY_HOST = "127.0.0.1"
 DEFAULT_PROXY_PORT = 7890
@@ -67,10 +76,14 @@ LEDGER_FILE = XDL_HOME / "downloads.sqlite3"
 DEFAULT_STOP_AFTER_SKIPS = 20
 LAST_ERROR = ""
 
+THUMB_KEY_RE = re.compile(r"^[A-Za-z0-9_]{1,80}$")
+VIDEO_EXTS = {".mp4", ".webm", ".m4v", ".mov", ".mkv"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+
 MEDIA_FILE_RE = re.compile(
     r"^(?P<user>[A-Za-z0-9_]{1,15})_"
     r"(?P<date>\d{4}-\d{2}-\d{2})"
-    r"(?:[ T]\d{2}_\d{2}_\d{2})?_"
+    r"(?:[ T]\d{2}[:_-]\d{2}[:_-]\d{2})?_"
     r"(?P<tweet>\d{15,20})_"
     r"(?P<num>\d+)\.(?P<ext>[A-Za-z0-9]+)$"
 )
@@ -220,6 +233,23 @@ def ensure_download_store() -> None:
             "CREATE INDEX IF NOT EXISTS idx_media_tweet "
             "ON media(tweet_id)"
         )
+        existing_cols = {
+            row[1] for row in con.execute("PRAGMA table_info(media)").fetchall()
+        }
+        migrations = [
+            ("cloud_synced", "INTEGER NOT NULL DEFAULT 0"),
+            ("cloud_file_id", "TEXT NOT NULL DEFAULT ''"),
+            ("cloud_url", "TEXT NOT NULL DEFAULT ''"),
+            ("cloud_remote", "TEXT NOT NULL DEFAULT ''"),
+            ("local_deleted", "INTEGER NOT NULL DEFAULT 0"),
+        ]
+        for col_name, col_def in migrations:
+            if col_name not in existing_cols:
+                con.execute(f"ALTER TABLE media ADD COLUMN {col_name} {col_def}")
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_media_cloud "
+            "ON media(cloud_synced, local_deleted)"
+        )
 
 
 def archive_entry(tweet_id: str, media_index: int, retweet_id: int = 0) -> str:
@@ -257,14 +287,164 @@ def _write_media_rows(rows: list[tuple]) -> tuple[int, int]:
     with _db_connect(LEDGER_FILE) as con:
         before = con.total_changes
         con.executemany(
-            "INSERT OR IGNORE INTO media "
+            "INSERT INTO media "
             "(key, username, tweet_id, media_index, filename, path, size, "
             " downloaded_at, source) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET "
+            "path = excluded.path, size = excluded.size, local_deleted = 0",
             rows,
         )
         ledger_added = con.total_changes - before
     return archive_added, ledger_added
+
+
+def mark_media_cloud_synced(entries: list[dict]) -> int:
+    """Update or insert Google Drive sync metadata and local deletion state on media rows."""
+    if not entries:
+        return 0
+    ensure_download_store()
+    updated = 0
+    archive_rows: list[tuple[str]] = []
+    with _db_connect(LEDGER_FILE) as con:
+        for entry in entries:
+            filename = str(entry.get("filename") or "").strip()
+            if not filename:
+                continue
+            username = str(entry.get("username") or "").strip().lstrip("@")
+            file_id = str(entry.get("cloudFileId") or "").strip()
+            cloud_url = str(entry.get("cloudUrl") or "").strip()
+            cloud_remote = str(entry.get("cloudRemote") or "").strip()
+            local_deleted = 1 if entry.get("localDeleted") else 0
+            size = max(0, int(entry.get("size") or 0))
+            if username:
+                cur = con.execute(
+                    "UPDATE media SET cloud_synced = 1, "
+                    "size = CASE WHEN size = 0 AND ? > 0 THEN ? ELSE size END, "
+                    "cloud_file_id = CASE WHEN ? != '' THEN ? ELSE cloud_file_id END, "
+                    "cloud_url = CASE WHEN ? != '' THEN ? ELSE cloud_url END, "
+                    "cloud_remote = CASE WHEN ? != '' THEN ? ELSE cloud_remote END, "
+                    "local_deleted = ? "
+                    "WHERE lower(username) = lower(?) AND filename = ?",
+                    (
+                        size, size,
+                        file_id, file_id,
+                        cloud_url, cloud_url,
+                        cloud_remote, cloud_remote,
+                        local_deleted,
+                        username, filename,
+                    ),
+                )
+            else:
+                cur = con.execute(
+                    "UPDATE media SET cloud_synced = 1, "
+                    "size = CASE WHEN size = 0 AND ? > 0 THEN ? ELSE size END, "
+                    "cloud_file_id = CASE WHEN ? != '' THEN ? ELSE cloud_file_id END, "
+                    "cloud_url = CASE WHEN ? != '' THEN ? ELSE cloud_url END, "
+                    "cloud_remote = CASE WHEN ? != '' THEN ? ELSE cloud_remote END, "
+                    "local_deleted = ? "
+                    "WHERE filename = ?",
+                    (
+                        size, size,
+                        file_id, file_id,
+                        cloud_url, cloud_url,
+                        cloud_remote, cloud_remote,
+                        local_deleted,
+                        filename,
+                    ),
+                )
+            if cur.rowcount and cur.rowcount > 0:
+                updated += cur.rowcount
+                continue
+
+            parsed = parse_media_name(filename, username or None)
+            if parsed is None:
+                continue
+            key = archive_entry(parsed["tweet"], parsed["num"])
+            row_user = username or parsed["user"]
+            downloaded_at = str(entry.get("downloadedAt") or "").strip() or f"{parsed['date']} 00:00:00"
+            local_path = str(entry.get("localPath") or "").strip()
+            con.execute(
+                "INSERT INTO media "
+                "(key, username, tweet_id, media_index, filename, path, size, "
+                " downloaded_at, source, cloud_synced, cloud_file_id, cloud_url, "
+                " cloud_remote, local_deleted) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cloud', 1, ?, ?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET "
+                "filename = excluded.filename, "
+                "size = CASE WHEN media.size = 0 AND excluded.size > 0 THEN excluded.size ELSE media.size END, "
+                "cloud_synced = 1, "
+                "cloud_file_id = CASE WHEN excluded.cloud_file_id != '' THEN excluded.cloud_file_id ELSE media.cloud_file_id END, "
+                "cloud_url = CASE WHEN excluded.cloud_url != '' THEN excluded.cloud_url ELSE media.cloud_url END, "
+                "cloud_remote = CASE WHEN excluded.cloud_remote != '' THEN excluded.cloud_remote ELSE media.cloud_remote END, "
+                "local_deleted = excluded.local_deleted",
+                (
+                    key,
+                    row_user,
+                    parsed["tweet"],
+                    parsed["num"],
+                    filename,
+                    local_path,
+                    size,
+                    downloaded_at,
+                    file_id,
+                    cloud_url,
+                    cloud_remote,
+                    local_deleted,
+                ),
+            )
+            archive_rows.append((key,))
+            updated += 1
+    if archive_rows:
+        with _db_connect(ARCHIVE_FILE) as acon:
+            acon.executemany(
+                "INSERT OR IGNORE INTO archive (entry) VALUES (?)",
+                archive_rows,
+            )
+    return updated
+
+
+def mark_media_local_deleted(
+    username: str | None = None,
+    filename: str | None = None,
+    remove_if_unsynced: bool = True,
+) -> int:
+    """Mark cloud-synced media as locally deleted, or remove unsynced rows from ledger."""
+    ensure_download_store()
+    clauses = ["1=1"]
+    params: list = []
+    if username:
+        clauses.append("lower(username) = lower(?)")
+        params.append(username.lstrip("@"))
+    if filename:
+        clauses.append("filename = ?")
+        params.append(filename)
+    where_sql = " AND ".join(clauses)
+    affected = 0
+    deleted_keys: list[str] = []
+    with _db_connect(LEDGER_FILE) as con:
+        cur1 = con.execute(
+            f"UPDATE media SET local_deleted = 1 WHERE cloud_synced = 1 AND {where_sql}",
+            params,
+        )
+        affected += cur1.rowcount or 0
+        if remove_if_unsynced:
+            deleted_keys = [
+                str(r[0])
+                for r in con.execute(
+                    f"SELECT key FROM media WHERE cloud_synced = 0 AND {where_sql}",
+                    params,
+                ).fetchall()
+                if r and r[0]
+            ]
+            cur2 = con.execute(
+                f"DELETE FROM media WHERE cloud_synced = 0 AND {where_sql}",
+                params,
+            )
+            affected += cur2.rowcount or 0
+    for key in deleted_keys:
+        delete_thumb_for_key(key)
+    return affected
 
 
 def backfill_directory(
@@ -314,6 +494,13 @@ def backfill_directory(
             "existing",
         ))
     archive_added, ledger_added = _write_media_rows(rows)
+    if rows and shutil.which("ffmpeg"):
+        for row in rows:
+            try:
+                if thumb_path_for_key(row[0]) is None:
+                    generate_thumbnail(row[5], row[0])
+            except Exception:
+                pass
     return {
         "user": username,
         "files": found,
@@ -407,6 +594,15 @@ def collect_new_files(
             "extension": parsed["ext"],
         })
     _write_media_rows(rows)
+    if new_files and shutil.which("ffmpeg"):
+        for item in new_files:
+            try:
+                generate_thumbnail(
+                    item["path"],
+                    archive_entry(item["tweetId"], item["mediaIndex"]),
+                )
+            except Exception:
+                pass
     return new_files
 
 
@@ -426,29 +622,273 @@ def count_skipped_from_log(text: str) -> int:
     return len(seen)
 
 
+def _is_local_file_present(path_str: str, local_deleted: bool) -> bool:
+    if local_deleted or not path_str:
+        return False
+    try:
+        return Path(path_str).is_file()
+    except OSError:
+        return False
+
+
+def get_thumbs_dir() -> Path:
+    """Return the local micro-thumbnail directory derived dynamically from XDL_HOME."""
+    return XDL_HOME / "thumbs"
+
+
+def thumb_path_for_key(key: str) -> Path | None:
+    """Return existing non-empty thumbnail Path (.webp or .jpg) for a validated archive key."""
+    if not key or not THUMB_KEY_RE.fullmatch(str(key)):
+        return None
+    thumbs_dir = get_thumbs_dir()
+    for ext in (".webp", ".jpg"):
+        candidate = thumbs_dir / f"{key}{ext}"
+        try:
+            if candidate.is_file() and candidate.stat().st_size > 0:
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def delete_thumb_for_key(key: str) -> None:
+    """Remove any cached thumbnail file for the given key."""
+    if not key or not THUMB_KEY_RE.fullmatch(str(key)):
+        return
+    thumbs_dir = get_thumbs_dir()
+    for ext in (".webp", ".jpg"):
+        try:
+            (thumbs_dir / f"{key}{ext}").unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _run_ffmpeg_thumb(
+    ffmpeg_bin: str,
+    src: Path,
+    tmp_out: Path,
+    *,
+    is_video: bool,
+    seek_sec: int,
+    codec: str,
+) -> bool:
+    cmd = [ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-y"]
+    if is_video and seek_sec > 0:
+        cmd.extend(["-ss", f"00:00:{seek_sec:02d}"])
+    cmd.extend(["-i", str(src), "-frames:v", "1"])
+    if codec == "webp":
+        cmd.extend([
+            "-vf", "scale='min(480,iw)':-2",
+            "-c:v", "libwebp",
+            "-quality", "75",
+            "-compression_level", "4",
+        ])
+    else:
+        cmd.extend([
+            "-vf", "scale='min(480,iw)':-2,format=yuvj420p",
+            "-c:v", "mjpeg",
+            "-q:v", "5",
+        ])
+    cmd.append(str(tmp_out))
+    timeout = 20 if is_video else 15
+    try:
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+        )
+        if res.returncode != 0 or not tmp_out.is_file() or tmp_out.stat().st_size < 32:
+            return False
+        with tmp_out.open("rb") as fh:
+            hdr = fh.read(12)
+        if codec == "webp":
+            return len(hdr) >= 12 and hdr[:4] == b"RIFF" and hdr[8:12] == b"WEBP"
+        return len(hdr) >= 3 and hdr[:2] == b"\xff\xd8"
+    except Exception:
+        return False
+
+
+def generate_thumbnail(
+    src_path: Path | str,
+    key: str,
+    *,
+    force: bool = False,
+) -> Path | None:
+    """Generate a compressed <=480px WebP (or fallback JPEG) micro-thumbnail."""
+    if not key or not THUMB_KEY_RE.fullmatch(str(key)):
+        return None
+    if not force:
+        existing = thumb_path_for_key(key)
+        if existing is not None:
+            return existing
+    src = Path(src_path)
+    try:
+        if not src.is_file() or src.stat().st_size <= 0:
+            return None
+    except OSError:
+        return None
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        return None
+
+    ext = src.suffix.lower()
+    if ext not in VIDEO_EXTS and ext not in IMAGE_EXTS:
+        return None
+    is_video = ext in VIDEO_EXTS
+    thumbs_dir = get_thumbs_dir()
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+
+    attempts: list[tuple[str, int]] = []
+    if is_video:
+        attempts.extend([("webp", 1), ("webp", 0), ("jpg", 1), ("jpg", 0)])
+    else:
+        attempts.extend([("webp", 0), ("jpg", 0)])
+
+    for codec, seek_sec in attempts:
+        suffix = ".webp" if codec == "webp" else ".jpg"
+        dest = thumbs_dir / f"{key}{suffix}"
+        tmp = thumbs_dir / f".tmp_{key}_{os.getpid()}_{time.time_ns()}{suffix}"
+        try:
+            if _run_ffmpeg_thumb(
+                ffmpeg_bin, src, tmp, is_video=is_video, seek_sec=seek_sec, codec=codec
+            ):
+                os.replace(tmp, dest)
+                other_ext = ".jpg" if suffix == ".webp" else ".webp"
+                try:
+                    (thumbs_dir / f"{key}{other_ext}").unlink(missing_ok=True)
+                except OSError:
+                    pass
+                return dest
+        finally:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+    return None
+
+
+def ensure_thumbs_for_paths(
+    paths: list[Path],
+    username: str | None = None,
+) -> int:
+    """Ensure local micro-thumbnails exist for matching local media files."""
+    if not paths:
+        return 0
+    ready = 0
+    for path in paths:
+        parsed = parse_media_name(Path(path).name, username)
+        if parsed is None:
+            continue
+        key = archive_entry(parsed["tweet"], parsed["num"])
+        try:
+            if generate_thumbnail(path, key) is not None:
+                ready += 1
+        except Exception:
+            continue
+    return ready
+
+
+def list_media_missing_thumbs(username: str | None = None) -> list[dict]:
+    """Return media ledger rows that do not currently have a cached local thumbnail."""
+    ensure_download_store()
+    sql = [
+        "SELECT key, username, filename, path, cloud_file_id, cloud_remote, cloud_synced, local_deleted",
+        "FROM media",
+    ]
+    params: list = []
+    if username:
+        sql.append("WHERE lower(username) = lower(?)")
+        params.append(username.lstrip("@"))
+    sql.append("ORDER BY downloaded_at DESC, rowid DESC")
+    with _db_connect(LEDGER_FILE) as con:
+        rows = con.execute(" ".join(sql), params).fetchall()
+    missing: list[dict] = []
+    for row in rows:
+        key = str(row[0] or "")
+        if not THUMB_KEY_RE.fullmatch(key):
+            continue
+        if thumb_path_for_key(key) is not None:
+            continue
+        missing.append({
+            "key": key,
+            "username": row[1] or "",
+            "filename": row[2] or "",
+            "path": row[3] or "",
+            "cloudFileId": row[4] or "",
+            "cloudRemote": row[5] or "",
+            "cloudSynced": bool(row[6]),
+            "localDeleted": bool(row[7]),
+        })
+    return missing
+
+
+def thumbs_summary() -> dict:
+    """Summarize cached micro-thumbnails count, total bytes, and missing rows."""
+    thumbs_dir = get_thumbs_dir()
+    count = 0
+    total_bytes = 0
+    if thumbs_dir.is_dir():
+        for entry in thumbs_dir.iterdir():
+            if not entry.is_file() or entry.name.startswith("."):
+                continue
+            if entry.suffix.lower() not in {".webp", ".jpg"}:
+                continue
+            try:
+                sz = entry.stat().st_size
+            except OSError:
+                continue
+            if sz > 0:
+                count += 1
+                total_bytes += sz
+    try:
+        missing = len(list_media_missing_thumbs())
+    except Exception:
+        missing = 0
+    return {
+        "count": count,
+        "bytes": total_bytes,
+        "missing": missing,
+        "ffmpeg": bool(shutil.which("ffmpeg")),
+    }
+
+
 def recent_media(username: str, limit: int = 8) -> list[dict]:
     ensure_download_store()
     with _db_connect(LEDGER_FILE) as con:
         cursor = con.execute(
-            "SELECT tweet_id, media_index, filename, path, size, "
-            "       downloaded_at, source "
+            "SELECT key, tweet_id, media_index, filename, path, size, "
+            "       downloaded_at, source, cloud_synced, cloud_file_id, "
+            "       cloud_url, cloud_remote, local_deleted "
             "FROM media WHERE lower(username)=lower(?) "
             "ORDER BY downloaded_at DESC, rowid DESC LIMIT ?",
             (username, max(1, min(200, int(limit)))),
         )
         rows = cursor.fetchall()
-    return [
-        {
-            "tweetId": row[0],
-            "mediaIndex": row[1],
-            "filename": row[2],
-            "path": row[3],
-            "size": row[4],
-            "downloadedAt": row[5],
-            "source": row[6],
-        }
-        for row in rows
-    ]
+    result: list[dict] = []
+    for row in rows:
+        key = str(row[0] or "")
+        has_thumb = thumb_path_for_key(key) is not None
+        result.append({
+            "key": key,
+            "tweetId": row[1],
+            "mediaIndex": row[2],
+            "filename": row[3],
+            "path": row[4],
+            "size": row[5],
+            "downloadedAt": row[6],
+            "source": row[7],
+            "cloudSynced": bool(row[8]),
+            "cloudFileId": row[9] or "",
+            "cloudUrl": row[10] or "",
+            "cloudRemote": row[11] or "",
+            "localDeleted": bool(row[12]),
+            "localExists": _is_local_file_present(row[4] or "", bool(row[12])),
+            "hasThumb": has_thumb,
+            "thumbUrl": f"/api/media/thumb?key={key}" if has_thumb else "",
+        })
+    return result
 
 
 def list_media(
@@ -457,12 +897,14 @@ def list_media(
     offset: int = 0,
     kind: str | None = None,
     keyword: str | None = None,
+    storage: str | None = None,
 ) -> list[dict]:
     """Return downloaded media across all users, newest first."""
     ensure_download_store()
     sql = [
-        "SELECT username, tweet_id, media_index, filename, path, size,",
-        "       downloaded_at, source FROM media WHERE 1=1",
+        "SELECT key, username, tweet_id, media_index, filename, path, size,",
+        "       downloaded_at, source, cloud_synced, cloud_file_id,",
+        "       cloud_url, cloud_remote, local_deleted FROM media WHERE 1=1",
     ]
     params: list = []
     if username:
@@ -476,6 +918,10 @@ def list_media(
         sql.append("AND (lower(filename) LIKE '%.mp4'")
         sql.append("     OR lower(filename) LIKE '%.webm'")
         sql.append("     OR lower(filename) LIKE '%.m4v')")
+    if storage == "local":
+        sql.append("AND local_deleted = 0")
+    elif storage == "cloud":
+        sql.append("AND cloud_synced = 1")
     if keyword:
         sql.append("AND (lower(filename) LIKE ? OR lower(username) LIKE ?)")
         like = f"%{keyword.lower()}%"
@@ -485,19 +931,30 @@ def list_media(
 
     with _db_connect(LEDGER_FILE) as con:
         rows = con.execute(" ".join(sql), params).fetchall()
-    return [
-        {
-            "username": row[0],
-            "tweetId": row[1],
-            "mediaIndex": row[2],
-            "filename": row[3],
-            "path": row[4],
-            "size": row[5],
-            "downloadedAt": row[6],
-            "source": row[7],
-        }
-        for row in rows
-    ]
+    result: list[dict] = []
+    for row in rows:
+        key = str(row[0] or "")
+        has_thumb = thumb_path_for_key(key) is not None
+        result.append({
+            "key": key,
+            "username": row[1],
+            "tweetId": row[2],
+            "mediaIndex": row[3],
+            "filename": row[4],
+            "path": row[5],
+            "size": row[6],
+            "downloadedAt": row[7],
+            "source": row[8],
+            "cloudSynced": bool(row[9]),
+            "cloudFileId": row[10] or "",
+            "cloudUrl": row[11] or "",
+            "cloudRemote": row[12] or "",
+            "localDeleted": bool(row[13]),
+            "localExists": _is_local_file_present(row[5] or "", bool(row[13])),
+            "hasThumb": has_thumb,
+            "thumbUrl": f"/api/media/thumb?key={key}" if has_thumb else "",
+        })
+    return result
 
 
 def media_kind_counts() -> dict:
@@ -510,7 +967,15 @@ def media_kind_counts() -> dict:
     with _db_connect(LEDGER_FILE) as con:
         total = con.execute("SELECT COUNT(*) FROM media").fetchone()[0]
         videos = con.execute(video_sql).fetchone()[0]
-    return {"all": total, "videos": videos, "images": total - videos}
+        local = con.execute("SELECT COUNT(*) FROM media WHERE local_deleted = 0").fetchone()[0]
+        cloud = con.execute("SELECT COUNT(*) FROM media WHERE cloud_synced = 1").fetchone()[0]
+    return {
+        "all": total,
+        "videos": videos,
+        "images": total - videos,
+        "local": local,
+        "cloud": cloud,
+    }
 
 
 def media_summary(username: str | None = None) -> dict:
@@ -533,6 +998,17 @@ def media_summary(username: str | None = None) -> dict:
 
 def media_count(username: str) -> int:
     return int(media_summary(username)["media"])
+
+
+def cloud_media_summary() -> dict:
+    """Return total count and bytes for media rows synced to Google Drive."""
+    ensure_download_store()
+    with _db_connect(LEDGER_FILE) as con:
+        row = con.execute(
+            "SELECT COUNT(*), COALESCE(SUM(size), 0) "
+            "FROM media WHERE cloud_synced = 1"
+        ).fetchone()
+    return {"files": int(row[0] or 0), "bytes": int(row[1] or 0)}
 
 
 # ============================================================
@@ -620,6 +1096,7 @@ def install_gallery_dl() -> bool:
 def find_cookies_file() -> str | None:
     """在常见位置查找 cookies.txt 文件。"""
     search_paths = [
+        XDL_HOME / "cookies.txt",
         Path.cwd() / "cookies.txt",
         Path.cwd() / "x_cookies.txt",
         Path.cwd() / "twitter_cookies.txt",

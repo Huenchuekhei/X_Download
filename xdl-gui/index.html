@@ -1,199 +1,281 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-type="software" data-radius="soft" data-motion="on">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#090b0f">
-<title>XDL · X 媒体批量下载工作台</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23090b0f'/%3E%3Cpath d='M8 8l16 16M24 8L8 24' stroke='%231d9bf0' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#18191b">
+<meta name="page-type" content="software">
+<meta name="site-kind" content="software">
+<meta name="description" content="XDL 云端工作台：批量抓取 X (Twitter) 博主图片与视频，支持时长过滤、在线画廊预览与 Google Drive 自动同步。">
+<title>XDL · X 媒体下载与云端归档工作台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2318191b'/%3E%3Cpath d='M8 8l16 16M24 8L8 24' stroke='%23ff4a1f' stroke-width='3.5' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body data-mobile-tab="queue">
-<a class="skip-link" href="#workspace-main">跳到主工作区</a>
-
 <div class="app" id="app">
 
-  <!-- 1. Top Web App Bar -->
+  <!-- Top Bar (56px) -->
   <header class="topbar">
-    <div class="tb-brand">
-      <span class="appmark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/></svg>
-      </span>
-      <div class="tb-titles">
-        <span class="tb-title">XDL</span>
-        <span class="tb-sub">X 媒体批量下载工作台</span>
-      </div>
-      <button class="urlchip" id="server-url-chip" type="button" title="点击复制访问地址">
-        <span class="dot dot-ok" aria-hidden="true"></span>
-        <span id="server-url-text">127.0.0.1:8765</span>
-      </button>
-    </div>
+    <div class="wrap topbar-inner">
+      <a class="skip-link" href="#workspace-main">跳到主工作区</a>
 
-    <div class="tb-status">
-      <div class="envchips" aria-label="运行环境状态">
-        <span class="envchip" id="env-cookies"><i class="dot" aria-hidden="true"></i><span id="env-cookies-text">Cookie 检测中…</span></span>
-        <span class="envchip" id="env-proxy"><i class="dot" aria-hidden="true"></i><span id="env-proxy-text">代理检测中…</span></span>
-        <span class="envchip" id="env-gdl">gallery-dl 检测中…</span>
-        <span class="envchip dim" id="env-store"><i class="dot" aria-hidden="true"></i><span id="env-store-text">档案准备中…</span></span>
-        <button class="envchip envchip-filter hidden" id="env-filter" type="button" title="点击跳转到媒体与视频时长过滤设置">
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-          <span id="env-filter-text"></span>
+      <div class="tb-brand">
+        <span class="appmark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="15" height="15"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
+        </span>
+        <div class="tb-titles">
+          <strong class="tb-title">XDL</strong>
+          <span class="tb-sub">X 媒体云端工作台</span>
+        </div>
+        <button class="urlchip" id="server-url-chip" type="button" title="点击复制当前访问地址">
+          <span class="dot dot-ok" aria-hidden="true"></span>
+          <span class="mono" id="server-url-text">loading…</span>
         </button>
       </div>
-      <div class="tb-actions">
-        <button class="btn ghost btn-sm" id="btn-open-root" type="button" title="在资源管理器中打开下载目录">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-          <span>打开目录</span>
-        </button>
-        <button class="btn danger-ghost btn-sm" id="btn-stop-service" type="button" title="安全停止本地 XDL 网页服务">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M12 3v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
-          <span>停止服务</span>
-        </button>
+
+      <div class="tb-right">
+        <div class="envchips" aria-label="运行环境状态">
+          <button class="envchip" id="env-cookies" type="button" title="点击前往配置 X Cookie">
+            <i class="dot" aria-hidden="true"></i>
+            <span id="env-cookies-text">Cookie 检测中…</span>
+          </button>
+          <span class="envchip" id="env-proxy">
+            <i class="dot" aria-hidden="true"></i>
+            <span id="env-proxy-text">网络检测中…</span>
+          </span>
+          <button class="envchip" id="env-cloud" type="button" title="点击配置 Google Drive 自动同步">
+            <i class="dot" aria-hidden="true"></i>
+            <span id="env-cloud-text">云盘未授权</span>
+          </button>
+          <span class="envchip hide-sm" id="env-storage" title="服务器可用存储空间">
+            <span class="mono" id="env-storage-text">存储 —</span>
+          </span>
+          <button class="envchip envchip-accent hidden" id="env-filter" type="button" title="点击调整媒体与时长过滤">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            <span id="env-filter-text"></span>
+          </button>
+        </div>
+
+        <div class="tb-actions">
+          <span class="envchip hide-sm auth-only" id="auth-user-chip" title="当前已登录管理员">
+            <i class="dot dot-ok" aria-hidden="true"></i>
+            <span class="mono" id="auth-username-text">admin</span>
+          </span>
+          <button class="btn ghost btn-sm auth-only" id="btn-logout" type="button" title="退出当前登录">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            <span>退出</span>
+          </button>
+          <button class="btn ghost btn-sm tablet-only" id="btn-open-side" type="button" aria-expanded="false" aria-controls="workspace-side">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+            <span>设置与同步</span>
+          </button>
+          <button class="btn ghost btn-sm desktop-only-action" id="btn-open-root" type="button" title="打开本地下载目录">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <span>打开目录</span>
+          </button>
+          <button class="btn danger-ghost btn-sm desktop-only-action" id="btn-stop-service" type="button" title="停止本地网页服务">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M12 3v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
+            <span>停止服务</span>
+          </button>
+        </div>
       </div>
     </div>
   </header>
 
-  <!-- 2. Interactive Web CMD Command Bar -->
-  <section class="cmdbar" aria-label="命令行控制台">
-    <form class="cmdbar-form" id="cmd-form" autocomplete="off">
-      <label class="cmd-prompt" for="cmd-input">xdl&gt;</label>
-      <input
-        id="cmd-input"
-        type="text"
-        spellcheck="false"
-        placeholder="输入 xdl 命令，例如：elonmusk --videos-only --max-duration 60  或  --retry"
-        aria-label="输入 xdl 命令（按 Ctrl+K 聚焦，上下方向键切换历史命令）"
-      >
-      <span class="cmd-kbd" aria-hidden="true">Ctrl+K</span>
-      <button class="btn primary btn-sm" id="btn-cmd-run" type="submit">执行</button>
-    </form>
-    <div class="cmd-presets" aria-label="快捷命令">
-      <span class="cmd-presets-label">常用命令：</span>
-      <button class="cmd-chip" type="button" data-cmd="elonmusk --videos-only --max-duration 60">elonmusk --videos-only --max-duration 60</button>
-      <button class="cmd-chip" type="button" data-cmd="--retry">--retry</button>
-      <button class="cmd-chip" type="button" data-cmd="--status">--status</button>
-      <button class="cmd-chip" type="button" data-cmd="--help">--help</button>
+  <!-- First-Screen Quick Input & Command Bar -->
+  <section class="quickbar" aria-label="快速抓取与命令控制台">
+    <div class="wrap quickbar-inner">
+      <div class="quick-top">
+        <div class="seg seg-compact" role="tablist" aria-label="输入模式">
+          <button class="seg-btn active" id="mode-accounts" role="tab" aria-selected="true" type="button">博主 / 链接</button>
+          <button class="seg-btn" id="mode-cmd" role="tab" aria-selected="false" type="button">CLI 命令</button>
+        </div>
+
+        <form class="quick-form" id="quick-form" autocomplete="off">
+          <div id="input-accounts-box" class="input-mode-box">
+            <label for="paste-input" class="sr-only">输入 X 博主用户名或主页链接</label>
+            <textarea id="paste-input" rows="1" spellcheck="false"
+              placeholder="粘贴 @用户名 或 x.com 链接（支持空格、逗号或换行批量导入，如 elonmusk, https://x.com/NASA）"></textarea>
+            <div class="quick-actions-row">
+              <button class="btn ghost btn-sm" id="btn-import-txt" type="button" title="导入 .txt 名单文件">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+                <span>导入 .txt</span>
+              </button>
+              <button class="btn ghost btn-sm" id="btn-add-only" type="button">仅入队</button>
+              <button class="btn primary btn-sm" id="btn-add-start" type="submit">加入并下载</button>
+            </div>
+          </div>
+
+          <div id="input-cmd-box" class="input-mode-box hidden">
+            <label class="cmd-prompt mono" for="cmd-input">xdl&gt;</label>
+            <input id="cmd-input" type="text" spellcheck="false"
+              placeholder="输入 xdl 命令，例如：NASA --videos-only --max-duration 60  或  --retry"
+              aria-label="输入 xdl 命令（Ctrl+K 聚焦，上下方向键切换历史）">
+            <span class="cmd-kbd mono" aria-hidden="true">Ctrl+K</span>
+            <button class="btn primary btn-sm" id="btn-cmd-run" type="submit">执行</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="quick-bottom">
+        <div class="preset-strip" role="group" aria-label="快捷筛选与命令">
+          <span class="strip-label">快捷操作</span>
+          <button class="cmd-chip" type="button" data-quick-preset="short-video">仅视频 ≤ 1 分钟</button>
+          <button class="cmd-chip" type="button" data-quick-preset="videos">仅视频</button>
+          <button class="cmd-chip" type="button" data-quick-preset="images">仅图片</button>
+          <button class="cmd-chip" type="button" data-cmd="--retry">--retry 重试失败</button>
+          <button class="cmd-chip" type="button" data-cmd="--status">--status 查看状态</button>
+        </div>
+        <div class="parse-stats hidden" id="parse-stats" aria-live="polite"></div>
+      </div>
     </div>
   </section>
 
-  <!-- 3. Main Responsive Workspace -->
-  <main class="workspace" id="workspace-main">
-    <div class="workspace-main">
+  <!-- Main 12-Col Asymmetric Workbench -->
+  <main class="workbench" id="workspace-main">
+    <div class="wrap workbench-grid">
 
-      <!-- Batch Account Importer -->
-      <section class="panel import-panel" aria-labelledby="import-title">
-        <div class="panel-head">
-          <h2 id="import-title">导入博主</h2>
-          <div class="head-tools">
-            <div class="tabs" role="tablist" aria-label="导入方式">
-              <button class="tab active" id="tab-paste" role="tab" aria-selected="true" type="button">粘贴文本</button>
-              <button class="tab" id="tab-file" role="tab" aria-selected="false" type="button">导入 .txt</button>
-            </div>
-            <button class="iconbtn" id="btn-import-toggle" type="button" aria-expanded="true" aria-controls="import-body" title="收起导入区" aria-label="收起导入区">
-              <svg id="import-toggle-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
-            </button>
-          </div>
-        </div>
-
-        <div id="import-body">
-          <div class="tabpane" id="pane-paste">
-            <textarea id="paste-input" rows="3" spellcheck="false"
-              placeholder="每行一个，也可用逗号 / 空格分隔；支持 @用户名 和主页链接，例如：&#10;elonmusk&#10;https://x.com/NASA/media&#10;@SpaceX, natgeo"></textarea>
-            <div class="paste-meta">
-              <span id="char-count">0 字符</span>
-              <span class="hint">自动去重 · 忽略无效行 · Ctrl+Enter 快速加入</span>
-            </div>
-            <div class="parse-stats hidden" id="parse-stats" aria-live="polite"></div>
-            <div class="btnrow">
-              <button class="btn primary" id="btn-add" type="button">解析并加入队列</button>
-              <button class="btn ghost" id="btn-clear-input" type="button">清空</button>
-            </div>
-          </div>
-
-          <div class="tabpane hidden" id="pane-file">
-            <label class="dropzone" id="dropzone" for="file-input">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 17v-6"/><path d="M9.5 13.5L12 11l2.5 2.5"/></svg>
-              <span class="dz-title">拖入 .txt 文件，或点击选择</span>
-              <span class="dz-sub">每行一个用户名 / 主页链接 · UTF-8 编码</span>
-            </label>
-            <div class="parse-stats hidden" id="file-stats" aria-live="polite"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- 4-Tab Task Workspace -->
+      <!-- Left 8 Columns: Task & Media Workspace -->
       <section class="panel workspace-panel" aria-labelledby="workspace-tabs-title">
         <div class="panel-head workspace-head">
-          <h2 id="workspace-tabs-title" class="sr-only">任务工作区</h2>
-          <div class="viewtabs" role="tablist" aria-label="任务视图">
-            <button class="viewtab active" id="view-accounts" role="tab" aria-selected="true" aria-controls="accounts-view" tabindex="0" type="button">下载队列 <span class="count" id="queue-count">0</span></button>
-            <button class="viewtab" id="view-logs" role="tab" aria-selected="false" aria-controls="logs-view" tabindex="-1" type="button">实时日志 <span class="log-live-dot hidden" id="log-live-dot" aria-hidden="true"></span></button>
-            <button class="viewtab" id="view-failed" role="tab" aria-selected="false" aria-controls="failed-view" tabindex="-1" type="button">失败队列 <span class="count count-bad count-zero" id="failed-count">0</span></button>
-            <button class="viewtab" id="view-done" role="tab" aria-selected="false" aria-controls="done-view" tabindex="-1" type="button">已完成 <span class="count count-ok" id="done-count">0</span></button>
+          <h1 id="workspace-tabs-title" class="sr-only">XDL 任务与媒体工作区</h1>
+          <div class="viewtabs" role="tablist" aria-label="工作区视图">
+            <button class="viewtab active" id="view-accounts" role="tab" aria-selected="true" aria-controls="accounts-view" tabindex="0" type="button">
+              <span>下载队列</span>
+              <span class="count mono" id="queue-count">0</span>
+            </button>
+            <button class="viewtab" id="view-done" role="tab" aria-selected="false" aria-controls="done-view" tabindex="-1" type="button">
+              <span>媒体库</span>
+              <span class="count count-ok mono" id="done-count">0</span>
+            </button>
+            <button class="viewtab" id="view-logs" role="tab" aria-selected="false" aria-controls="logs-view" tabindex="-1" type="button">
+              <span>实时日志</span>
+              <span class="log-live-dot hidden" id="log-live-dot" aria-hidden="true"></span>
+            </button>
+            <button class="viewtab" id="view-failed" role="tab" aria-selected="false" aria-controls="failed-view" tabindex="-1" type="button">
+              <span>失败队列</span>
+              <span class="count count-bad count-zero mono" id="failed-count">0</span>
+            </button>
           </div>
-          <span class="tag tag-dim" id="round-tag">第 1 轮</span>
+          <div class="head-meta">
+            <span class="tag mono" id="round-tag">第 1 轮</span>
+          </div>
         </div>
 
+        <!-- Overall Progress Bar -->
+        <div class="statusbar">
+          <div class="sb-progress">
+            <div class="sb-track" aria-hidden="true"><div class="sb-fill" id="overall-fill"></div></div>
+            <span class="mono sb-pct" id="overall-pct">0%</span>
+          </div>
+          <span class="sb-stats" id="sb-stats">完成 0/0 · 0 个文件</span>
+          <span class="sb-right mono" id="sb-time">已用 00:00</span>
+        </div>
+
+        <!-- Round Summary Banner -->
         <div class="roundbar hidden" id="roundbar">
           <div class="rb-text">
-            <span class="rb-title" id="rb-title">第 1 轮结束</span>
+            <strong class="rb-title" id="rb-title">第 1 轮结束</strong>
             <span class="rb-detail" id="rb-detail"></span>
           </div>
           <div class="rb-actions">
             <button class="btn primary btn-sm" id="btn-round-retry" type="button">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 4v7h-7"/></svg>
               <span id="btn-round-retry-label">一键重试失败</span>
             </button>
-            <button class="btn ghost btn-sm" id="btn-round-review" type="button">查看失败队列</button>
-            <button class="iconbtn" id="btn-round-dismiss" type="button" aria-label="收起本轮总结">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            <button class="btn ghost btn-sm" id="btn-round-review" type="button">查看失败</button>
+            <button class="iconbtn" id="btn-round-dismiss" type="button" aria-label="收起总结">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
             </button>
           </div>
         </div>
 
         <!-- Tab 1: Download Queue -->
         <div id="accounts-view" class="tab-view" role="tabpanel" aria-labelledby="view-accounts">
-          <div class="queue-toolbar">
-            <div class="chips" role="group" aria-label="按状态筛选">
+          <div class="toolbar">
+            <div class="chips" role="group" aria-label="按队列状态筛选">
               <button class="chip active" data-filter="all" aria-pressed="true" type="button">全部 <b id="c-all">0</b></button>
               <button class="chip" data-filter="waiting" aria-pressed="false" type="button">等待 <b id="c-waiting">0</b></button>
               <button class="chip" data-filter="active" aria-pressed="false" type="button">下载中 <b id="c-active">0</b></button>
               <button class="chip" data-filter="done" aria-pressed="false" type="button">完成 <b id="c-done">0</b></button>
               <button class="chip" data-filter="failed" aria-pressed="false" type="button">失败 <b id="c-failed">0</b></button>
             </div>
-            <input class="search" id="queue-search" type="search" placeholder="搜索博主" aria-label="搜索队列">
+            <input class="search" id="queue-search" type="search" placeholder="搜索博主…" aria-label="搜索队列博主">
           </div>
-          <div class="queue-actions">
-            <button class="btn primary" id="btn-start" type="button">
-              <svg id="btn-start-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5.5l11 6.5-11 6.5z"/></svg>
+
+          <div class="actions-bar">
+            <button class="btn primary btn-sm" id="btn-start" type="button">
+              <svg id="btn-start-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5.5l11 6.5-11 6.5z"/></svg>
               <span id="btn-start-label">开始下载</span>
             </button>
-            <button class="btn ghost" id="btn-stop-run" type="button" disabled>停止任务</button>
-            <button class="btn ghost" id="btn-retry-all" type="button">重试失败</button>
-            <button class="btn ghost" id="btn-clear-done" type="button">清除已完成</button>
-            <button class="btn danger-ghost" id="btn-delete-selected" type="button" disabled>删除所选</button>
+            <button class="btn ghost btn-sm" id="btn-stop-run" type="button" disabled>停止任务</button>
+            <button class="btn ghost btn-sm" id="btn-retry-all" type="button">重试失败</button>
+            <button class="btn ghost btn-sm" id="btn-clear-done" type="button">清除已完成</button>
+            <button class="btn danger-ghost btn-sm" id="btn-delete-selected" type="button" disabled>删除所选</button>
           </div>
-          <div class="queue-scroll">
+
+          <div class="table-wrap">
             <div class="qhead">
-              <span class="qcell q-grip"></span>
-              <span class="qcell q-check"><input type="checkbox" id="select-all" aria-label="全选当前列表"></span>
+              <span class="qcell q-grip" aria-hidden="true"></span>
+              <span class="qcell q-check"><input class="m-check" type="checkbox" id="select-all" aria-label="全选当前列表"></span>
               <span class="qcell q-user"><button class="sortbtn" id="sort-user" type="button">博主 <span class="arrow" id="sort-user-arrow"></span></button></span>
               <span class="qcell q-status">状态</span>
               <span class="qcell q-progress"><button class="sortbtn" id="sort-progress" type="button">进度 <span class="arrow" id="sort-progress-arrow"></span></button></span>
-              <span class="qcell q-files"><button class="sortbtn" id="sort-files" type="button" title="本次新增 / 本次跳过">本次 <span class="arrow" id="sort-files-arrow"></span></button></span>
+              <span class="qcell q-files"><button class="sortbtn" id="sort-files" type="button">本次 <span class="arrow" id="sort-files-arrow"></span></button></span>
               <span class="qcell q-ops">操作</span>
             </div>
-            <div id="queue-list"></div>
+            <div id="queue-list" class="row-list"></div>
             <div class="empty hidden" id="queue-empty">
-              <p class="empty-title">队列为空</p>
-              <p class="empty-sub">在上方输入 xdl 命令、粘贴用户名或导入 .txt 文件</p>
+              <p class="empty-title">当前队列为空</p>
+              <p class="empty-sub">在上方输入 @用户名、x.com 主页链接或 xdl 命令即可开始</p>
             </div>
           </div>
         </div>
 
-        <!-- Tab 2: Real-Time Logs -->
+        <!-- Tab 2: Media Library (Gallery Grid + List + Scheme A Google Drive Redirect) -->
+        <div id="done-view" class="tab-view hidden" role="tabpanel" aria-labelledby="view-done">
+          <div class="toolbar">
+            <div class="chips" role="group" aria-label="媒体类型筛选">
+              <button class="chip active" data-done="all" aria-pressed="true" type="button">全部 <b id="d-all">0</b></button>
+              <button class="chip" data-done="images" aria-pressed="false" type="button">图片 <b id="d-images">0</b></button>
+              <button class="chip" data-done="videos" aria-pressed="false" type="button">视频 <b id="d-videos">0</b></button>
+            </div>
+            <div class="chips" role="group" aria-label="存储位置筛选">
+              <button class="chip active" data-storage="all" aria-pressed="true" type="button">全部来源</button>
+              <button class="chip" data-storage="local" aria-pressed="false" type="button">本地可播 <b id="d-local">0</b></button>
+              <button class="chip" data-storage="cloud" aria-pressed="false" type="button">Google Drive <b id="d-cloud">0</b></button>
+            </div>
+          </div>
+
+          <div class="actions-bar done-actions-bar">
+            <input class="search search-grow" id="done-search" type="search" placeholder="搜索文件名或 @博主…" aria-label="搜索媒体库">
+            <div class="seg seg-compact" role="group" aria-label="媒体视图模式">
+              <button class="seg-btn active" id="done-mode-grid" type="button" aria-pressed="true">画廊</button>
+              <button class="seg-btn" id="done-mode-list" type="button" aria-pressed="false">列表</button>
+            </div>
+            <button class="btn ghost btn-sm" id="btn-done-export" type="button">导出 CSV</button>
+            <button class="btn ghost btn-sm hidden" id="btn-backfill-thumbs" type="button">补全缩略图</button>
+            <button class="btn ghost btn-sm" id="btn-done-refresh" type="button">刷新</button>
+          </div>
+
+          <div class="table-wrap">
+            <div id="done-list" class="done-container"></div>
+            <div class="empty hidden" id="done-empty">
+              <p class="empty-title">暂无媒体记录</p>
+              <p class="empty-sub">下载完成后，本地文件支持直接高清预览播放；开启云盘自动同步并释放空间后，点击条目将直达 Google Drive 播放</p>
+            </div>
+            <div class="more-row hidden" id="done-more">
+              <button class="btn ghost btn-sm" id="btn-done-more" type="button">加载更多</button>
+              <span class="more-note" id="done-more-note"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Real-Time Logs -->
         <div id="logs-view" class="tab-view hidden" role="tabpanel" aria-labelledby="view-logs">
-          <div class="queue-toolbar">
+          <div class="toolbar">
             <div class="chips" role="group" aria-label="按日志级别筛选">
               <button class="chip active" data-log-level="all" aria-pressed="true" type="button">全部</button>
               <button class="chip" data-log-level="cmd" aria-pressed="false" type="button">命令</button>
@@ -206,36 +288,38 @@
               <select class="select-sm" id="log-user-filter" aria-label="按博主筛选日志">
                 <option value="">全部账号</option>
               </select>
-              <input class="search" id="log-search" type="search" placeholder="过滤日志关键字" aria-label="过滤日志">
+              <input class="search" id="log-search" type="search" placeholder="过滤关键字…" aria-label="过滤日志">
             </div>
           </div>
-          <div class="queue-actions log-actions">
-            <label class="switch-inline" for="log-autoscroll">
-              <input type="checkbox" id="log-autoscroll" checked>
-              <span>自动滚动到底部</span>
+
+          <div class="actions-bar">
+            <label class="check-inline" for="log-autoscroll">
+              <input class="m-check" type="checkbox" id="log-autoscroll" checked>
+              <span>自动滚动</span>
             </label>
-            <span class="log-counter" id="log-counter">0 条日志</span>
-            <div class="log-actions-right">
-              <button class="btn ghost btn-sm" id="btn-log-copy" type="button">复制日志</button>
-              <button class="btn ghost btn-sm" id="btn-log-export" type="button">导出 .log</button>
-              <button class="btn danger-ghost btn-sm" id="btn-log-clear" type="button">清空</button>
-            </div>
+            <span class="mono log-counter" id="log-counter">0 条日志</span>
+            <div class="actions-spacer"></div>
+            <button class="btn ghost btn-sm" id="btn-log-copy" type="button">复制</button>
+            <button class="btn ghost btn-sm" id="btn-log-export" type="button">导出 .log</button>
+            <button class="btn danger-ghost btn-sm" id="btn-log-clear" type="button">清空</button>
           </div>
+
           <div class="log-terminal" id="log-terminal" role="log" aria-live="polite" aria-label="实时运行日志">
             <div class="empty" id="log-empty">
               <p class="empty-title">暂无运行日志</p>
-              <p class="empty-sub">执行 xdl 命令或开始下载后，实时输出将在此滚动显示</p>
+              <p class="empty-sub">开始下载或执行云盘同步后，日志将在此实时滚动显示</p>
             </div>
           </div>
         </div>
 
-        <!-- Tab 3: Failed Queue -->
+        <!-- Tab 4: Failed Queue -->
         <div id="failed-view" class="tab-view hidden" role="tabpanel" aria-labelledby="view-failed">
           <div class="explain">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5"/><path d="M12 8h.01"/></svg>
-            <span>失败队列按「推文 + 媒体」逐条记录。重试只补采失败的那几条推文，已成功的媒体不会重复下载；账号级失败会整号重扫。</span>
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5"/><path d="M12 8h.01"/></svg>
+            <span>失败项按推文与媒体粒度精确记录，重试时不会重复抓取已成功的媒体。</span>
           </div>
-          <div class="queue-toolbar">
+
+          <div class="toolbar">
             <div class="chips" role="group" aria-label="按失败原因筛选">
               <button class="chip active" data-reason="all" aria-pressed="true" type="button">全部 <b id="f-all">0</b></button>
               <button class="chip" data-reason="timeout" aria-pressed="false" type="button">超时 <b id="f-timeout">0</b></button>
@@ -243,342 +327,431 @@
               <button class="chip" data-reason="forbidden" aria-pressed="false" type="button">权限 <b id="f-forbidden">0</b></button>
               <button class="chip" data-reason="exhausted" aria-pressed="false" type="button">不可重试 <b id="f-exhausted">0</b></button>
             </div>
-            <input class="search" id="failed-search" type="search" placeholder="搜索文件 / 博主" aria-label="搜索失败文件">
+            <input class="search" id="failed-search" type="search" placeholder="搜索失败文件…" aria-label="搜索失败文件">
           </div>
-          <div class="queue-actions">
-            <button class="btn primary" id="btn-failed-retry" type="button">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 4v7h-7"/></svg>
+
+          <div class="actions-bar">
+            <button class="btn primary btn-sm" id="btn-failed-retry" type="button">
               <span id="btn-failed-retry-label">重试全部失败</span>
             </button>
-            <button class="btn ghost" id="btn-failed-retry-selected" type="button" disabled>重试所选</button>
-            <button class="btn ghost" id="btn-failed-export" type="button">导出清单</button>
-            <button class="btn danger-ghost" id="btn-failed-discard" type="button" disabled>放弃所选</button>
+            <button class="btn ghost btn-sm" id="btn-failed-retry-selected" type="button" disabled>重试所选</button>
+            <button class="btn ghost btn-sm" id="btn-failed-export" type="button">导出清单</button>
+            <button class="btn danger-ghost btn-sm" id="btn-failed-discard" type="button" disabled>放弃所选</button>
           </div>
-          <div class="queue-scroll">
+
+          <div class="table-wrap">
             <div class="fhead">
-              <span class="fcell f-check"><input type="checkbox" id="failed-select-all" aria-label="全选失败文件"></span>
+              <span class="fcell f-check"><input class="m-check" type="checkbox" id="failed-select-all" aria-label="全选失败文件"></span>
               <span class="fcell f-file"><button class="sortbtn" id="fsort-file" type="button">失败文件 <span class="arrow" id="fsort-file-arrow"></span></button></span>
               <span class="fcell f-reason"><button class="sortbtn" id="fsort-reason" type="button">原因 <span class="arrow" id="fsort-reason-arrow"></span></button></span>
               <span class="fcell f-tries"><button class="sortbtn" id="fsort-tries" type="button">已试 <span class="arrow" id="fsort-tries-arrow"></span></button></span>
               <span class="fcell f-state">状态</span>
               <span class="fcell f-ops">操作</span>
             </div>
-            <div id="failed-list"></div>
+            <div id="failed-list" class="row-list"></div>
             <div class="empty hidden" id="failed-empty">
               <p class="empty-title">没有失败文件</p>
-              <p class="empty-sub">下载过程中出现的错误项会自动归类到这里</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 4: Completed Media -->
-        <div id="done-view" class="tab-view hidden" role="tabpanel" aria-labelledby="view-done">
-          <div class="queue-toolbar">
-            <div class="chips" role="group" aria-label="已完成筛选">
-              <button class="chip active" data-done="all" aria-pressed="true" type="button">全部 <b id="d-all">0</b></button>
-              <button class="chip" data-done="images" aria-pressed="false" type="button">图片 <b id="d-images">0</b></button>
-              <button class="chip" data-done="videos" aria-pressed="false" type="button">视频 <b id="d-videos">0</b></button>
-            </div>
-            <input class="search" id="done-search" type="search" placeholder="搜索文件名 / 博主" aria-label="搜索已完成">
-          </div>
-          <div class="queue-actions">
-            <button class="btn ghost" id="btn-done-export" type="button">导出 CSV</button>
-            <button class="btn ghost" id="btn-done-refresh" type="button">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 4v7h-7"/></svg>
-              <span>刷新记录</span>
-            </button>
-          </div>
-          <div class="queue-scroll">
-            <div class="dhead">
-              <span class="dcell"></span>
-              <span class="dcell d-file">文件</span>
-              <span class="dcell d-user">推文 ID</span>
-              <span class="dcell d-size">大小</span>
-              <span class="dcell d-time">下载时间</span>
-              <span class="dcell d-ops">操作</span>
-            </div>
-            <div id="done-list"></div>
-            <div class="empty hidden" id="done-empty">
-              <p class="empty-title">还没有下载记录</p>
-              <p class="empty-sub">下载完成的媒体会按博主分组列出，支持直接在线预览</p>
-            </div>
-            <div class="more-row hidden" id="done-more">
-              <button class="btn ghost btn-sm" id="btn-done-more" type="button">加载更多</button>
-              <span class="more-note" id="done-more-note"></span>
+              <p class="empty-sub">抓取异常的推文与媒体会自动归类到这里以便补采</p>
             </div>
           </div>
         </div>
       </section>
-    </div>
 
-    <!-- 4. Right Rail: Duration Filter + Settings + Folder Structure -->
-    <aside class="workspace-side" id="workspace-side" aria-label="筛选与参数配置">
-
-      <!-- NEW Card 1: Media & Video Duration Filter -->
-      <section class="panel filter-panel" id="filter-panel" aria-labelledby="filter-title">
-        <div class="panel-head">
-          <h2 id="filter-title">媒体与视频时长过滤</h2>
-          <span class="tag" id="filter-status-tag">不限</span>
-        </div>
-        <div class="panel-body">
-          <div class="field">
-            <span class="field-label">媒体类型</span>
-            <div class="seg" role="group" aria-label="筛选下载的媒体类型">
-              <button class="seg-btn active" type="button" data-media-type="all" aria-pressed="true">全部媒体</button>
-              <button class="seg-btn" type="button" data-media-type="videos" aria-pressed="false">仅视频</button>
-              <button class="seg-btn" type="button" data-media-type="images" aria-pressed="false">仅图片</button>
-            </div>
-          </div>
-
-          <label class="switchrow" for="set-duration-enabled">
-            <span>限制单条视频最长时长</span>
-            <span class="switch"><input type="checkbox" id="set-duration-enabled"><i aria-hidden="true"></i></span>
-          </label>
-
-          <div class="duration-box" id="duration-controls">
-            <div class="preset-grid" role="group" aria-label="快捷时长预设">
-              <button class="preset-btn" type="button" data-duration-preset="15">15 秒</button>
-              <button class="preset-btn" type="button" data-duration-preset="30">30 秒</button>
-              <button class="preset-btn" type="button" data-duration-preset="60">1 分钟</button>
-              <button class="preset-btn" type="button" data-duration-preset="180">3 分钟</button>
-              <button class="preset-btn" type="button" data-duration-preset="300">5 分钟</button>
-              <button class="preset-btn" type="button" data-duration-preset="600">10 分钟</button>
-            </div>
-
-            <div class="duration-inputs">
-              <div class="dur-unit">
-                <label for="dur-min">分</label>
-                <div class="stepper">
-                  <button type="button" data-dur-step="-1" data-dur-field="min" aria-label="减少分钟"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
-                  <input id="dur-min" type="number" min="0" max="120" step="1" value="1">
-                  <button type="button" data-dur-step="1" data-dur-field="min" aria-label="增加分钟"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
-                </div>
-              </div>
-              <span class="dur-colon" aria-hidden="true">:</span>
-              <div class="dur-unit">
-                <label for="dur-sec">秒</label>
-                <div class="stepper">
-                  <button type="button" data-dur-step="-5" data-dur-field="sec" aria-label="减少秒数"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
-                  <input id="dur-sec" type="number" min="0" max="59" step="5" value="0">
-                  <button type="button" data-dur-step="5" data-dur-field="sec" aria-label="增加秒数"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
-                </div>
-              </div>
-            </div>
-
-            <div class="range-wrap">
-              <input id="dur-slider" type="range" min="5" max="600" step="5" value="60" aria-label="视频最长时长滑块">
-              <div class="range-meta">
-                <span>5 秒</span>
-                <span class="mono" id="dur-total-badge">= 60 秒 · --max-duration 60</span>
-                <span>10 分钟</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="rule-summary" id="filter-rule-summary" aria-live="polite"></div>
-
-          <button class="btn ghost wide btn-sm" id="btn-preset-short-video" type="button">
-            套用场景：仅下载 ≤ 1 分钟视频
+      <!-- Right 4 Columns: Filters, Cloud Sync (方案 A), Cookies & Parameters -->
+      <div class="side-backdrop hidden" id="side-backdrop"></div>
+      <aside class="workspace-side" id="workspace-side" aria-label="筛选、云盘同步与系统参数">
+        <div class="side-drawer-head tablet-only">
+          <strong>筛选、云盘同步与配置</strong>
+          <button class="iconbtn" id="btn-close-side" type="button" aria-label="关闭设置面板">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
         </div>
-      </section>
 
-      <!-- Card 2: Download Parameters -->
-      <section class="panel settings-panel" aria-labelledby="settings-title">
-        <div class="panel-head">
-          <h2 id="settings-title">下载参数配置</h2>
-        </div>
-        <div class="panel-body settings-body">
-          <div class="field">
-            <label for="set-output">下载目录</label>
-            <div class="inputrow">
-              <input id="set-output" type="text" spellcheck="false">
-              <button class="btn ghost btn-sm" id="btn-browse-output" type="button">浏览…</button>
+        <!-- Card 1: Cloud Drive Auto-Sync (Google Drive · 方案 A) -->
+        <section class="panel cloud-panel" id="cloud-panel" aria-labelledby="cloud-title">
+          <div class="panel-head">
+            <h2 id="cloud-title">自动同步到云盘</h2>
+            <span class="tag" id="cloud-status-tag">未授权</span>
+          </div>
+          <div class="panel-body">
+            <label class="switchrow" for="set-cloud-enabled">
+              <span class="switch-copy">
+                <strong>自动同步到云盘</strong>
+                <small>下载完成即上传 Google Drive 并记录预览直链</small>
+              </span>
+              <span class="switch"><input type="checkbox" id="set-cloud-enabled"><i aria-hidden="true"></i></span>
+            </label>
+
+            <label class="switchrow" for="set-cloud-delete-local">
+              <span class="switch-copy">
+                <strong>上传后释放本地空间</strong>
+                <small>校验云端写入成功后自动删除服务器本地文件</small>
+              </span>
+              <span class="switch"><input type="checkbox" id="set-cloud-delete-local" checked><i aria-hidden="true"></i></span>
+            </label>
+
+            <div class="field">
+              <label for="set-cloud-target">目标云盘目录 (rclone)</label>
+              <input id="set-cloud-target" type="text" spellcheck="false" placeholder="gdrive:X_Download">
+            </div>
+
+            <div class="cloud-guide hidden" id="cloud-setup-guide">
+              <p>首次使用需在服务器终端完成一次 Google OAuth 授权：</p>
+              <div class="code-copy-row">
+                <code class="mono" id="cloud-setup-cmd">bash /opt/X_Download/setup_gdrive.sh</code>
+                <button class="btn ghost btn-sm" id="btn-copy-setup-cmd" type="button">复制</button>
+              </div>
+            </div>
+
+            <div class="rule-summary" id="cloud-sync-summary" aria-live="polite">尚未配置 Google Drive 同步。</div>
+
+            <div class="btnrow">
+              <button class="btn ghost btn-sm" id="btn-cloud-test" type="button">测试连接</button>
+              <button class="btn primary btn-sm" id="btn-cloud-run" type="button">同步并核对云盘</button>
+            </div>
+            <a class="btn ghost btn-sm wide hidden" id="btn-cloud-open-drive" href="#" target="_blank" rel="noopener noreferrer">在 Google Drive 打开目标目录 ↗</a>
+          </div>
+        </section>
+
+        <!-- Card 2: Cookie & Server Storage -->
+        <section class="panel cookie-panel" id="cookie-panel" aria-labelledby="cookie-title">
+          <div class="panel-head">
+            <h2 id="cookie-title">X Cookie 认证</h2>
+            <span class="tag" id="cookie-status-tag">检测中</span>
+          </div>
+          <div class="panel-body">
+            <div class="seg" role="tablist" aria-label="Cookie 导入方式">
+              <button class="seg-btn active" id="ck-tab-token" type="button" role="tab" aria-selected="true">快捷填入 Token</button>
+              <button class="seg-btn" id="ck-tab-file" type="button" role="tab" aria-selected="false">上传 cookies.txt</button>
+            </div>
+
+            <div id="ck-pane-token" class="ck-pane">
+              <div class="field">
+                <label for="ck-auth-token">auth_token</label>
+                <input id="ck-auth-token" type="password" autocomplete="off" spellcheck="false" placeholder="从 x.com Cookie 复制 auth_token">
+              </div>
+              <div class="field">
+                <label for="ck-ct0">ct0</label>
+                <input id="ck-ct0" type="password" autocomplete="off" spellcheck="false" placeholder="从 x.com Cookie 复制 ct0">
+              </div>
+              <button class="btn primary btn-sm wide" id="btn-save-tokens" type="button">保存 Token 到服务器</button>
+              <p class="fieldnote">手机或电脑登录 x.com 后，在浏览器 Cookie 中复制两项即可，立即生效。</p>
+            </div>
+
+            <div id="ck-pane-file" class="ck-pane hidden">
+              <div id="cookies-file-box" class="cookies-box">
+                <div class="inputrow">
+                  <input id="set-cookies" type="text" spellcheck="false" aria-label="Cookie 文件路径">
+                  <button class="btn ghost btn-sm desktop-only-action" id="btn-browse-cookies" type="button">浏览</button>
+                  <button class="btn primary btn-sm" id="btn-upload-cookies" type="button">上传 .txt</button>
+                </div>
+              </div>
+              <div id="cookies-browser-box" class="cookies-box hidden">
+                <select id="set-cookies-browser" aria-label="选择浏览器">
+                  <option value="chrome">Google Chrome</option>
+                  <option value="edge">Microsoft Edge</option>
+                  <option value="firefox">Mozilla Firefox</option>
+                  <option value="brave">Brave</option>
+                  <option value="opera">Opera</option>
+                  <option value="chromium">Chromium</option>
+                  <option value="safari">Safari</option>
+                </select>
+              </div>
+              <p class="fieldnote">支持浏览器扩展导出的 Netscape 格式 cookies.txt。</p>
             </div>
           </div>
+        </section>
 
-          <div class="field">
-            <span class="field-label">Cookie 认证方式</span>
-            <div class="seg" role="group" aria-label="Cookie 来源">
-              <button class="seg-btn active" type="button" data-cookies-source="file" aria-pressed="true">cookies.txt</button>
-              <button class="seg-btn" type="button" data-cookies-source="browser" aria-pressed="false">从浏览器读取</button>
+        <!-- Card 3: Media & Video Duration Filter -->
+        <section class="panel filter-panel" id="filter-panel" aria-labelledby="filter-title">
+          <div class="panel-head">
+            <h2 id="filter-title">媒体与时长过滤</h2>
+            <span class="tag" id="filter-status-tag">不限</span>
+          </div>
+          <div class="panel-body">
+            <div class="field">
+              <span class="field-label">媒体类型</span>
+              <div class="seg" role="group" aria-label="筛选下载的媒体类型">
+                <button class="seg-btn active" type="button" data-media-type="all" aria-pressed="true">全部</button>
+                <button class="seg-btn" type="button" data-media-type="videos" aria-pressed="false">仅视频</button>
+                <button class="seg-btn" type="button" data-media-type="images" aria-pressed="false">仅图片</button>
+              </div>
             </div>
-            <div id="cookies-file-box" class="cookies-box">
+
+            <label class="switchrow" for="set-duration-enabled">
+              <span class="switch-copy"><strong>限制单条视频最长时长</strong></span>
+              <span class="switch"><input type="checkbox" id="set-duration-enabled"><i aria-hidden="true"></i></span>
+            </label>
+
+            <div class="duration-box" id="duration-controls">
+              <div class="preset-grid" role="group" aria-label="快捷时长预设">
+                <button class="preset-btn" type="button" data-duration-preset="15">15 秒</button>
+                <button class="preset-btn" type="button" data-duration-preset="30">30 秒</button>
+                <button class="preset-btn" type="button" data-duration-preset="60">1 分钟</button>
+                <button class="preset-btn" type="button" data-duration-preset="180">3 分钟</button>
+                <button class="preset-btn" type="button" data-duration-preset="300">5 分钟</button>
+                <button class="preset-btn" type="button" data-duration-preset="600">10 分钟</button>
+              </div>
+
+              <div class="duration-inputs">
+                <div class="dur-unit">
+                  <label for="dur-min">分</label>
+                  <div class="stepper">
+                    <button type="button" data-dur-step="-1" data-dur-field="min" aria-label="减少分钟"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+                    <input id="dur-min" type="number" min="0" max="120" step="1" value="1">
+                    <button type="button" data-dur-step="1" data-dur-field="min" aria-label="增加分钟"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+                  </div>
+                </div>
+                <span class="dur-colon" aria-hidden="true">:</span>
+                <div class="dur-unit">
+                  <label for="dur-sec">秒</label>
+                  <div class="stepper">
+                    <button type="button" data-dur-step="-5" data-dur-field="sec" aria-label="减少秒数"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+                    <input id="dur-sec" type="number" min="0" max="59" step="5" value="0">
+                    <button type="button" data-dur-step="5" data-dur-field="sec" aria-label="增加秒数"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="range-wrap">
+                <input id="dur-slider" type="range" min="5" max="600" step="5" value="60" aria-label="视频最长时长滑块">
+                <div class="range-meta mono">
+                  <span>5s</span>
+                  <span id="dur-total-badge">= 60 秒 · --max-duration 60</span>
+                  <span>10m</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rule-summary" id="filter-rule-summary" aria-live="polite"></div>
+
+            <button class="btn ghost btn-sm wide" id="btn-preset-short-video" type="button">
+              一键套用：仅下载 ≤ 1 分钟视频
+            </button>
+          </div>
+        </section>
+
+        <!-- Card 4: Download Parameters & Storage -->
+        <section class="panel settings-panel" aria-labelledby="settings-title">
+          <div class="panel-head">
+            <h2 id="settings-title">参数与存储管理</h2>
+            <span class="tag mono" id="store-badge">档案 —</span>
+          </div>
+          <div class="panel-body">
+            <div class="storage-card" id="storage-card">
+              <div class="storage-row">
+                <span>服务器可用磁盘</span>
+                <strong class="mono" id="storage-free-label">—</strong>
+              </div>
+              <div class="sb-track" aria-hidden="true"><div class="sb-fill" id="storage-fill"></div></div>
+              <div class="storage-meta">
+                <span class="mono" id="storage-detail-label">目录：/opt/X_Download/downloads</span>
+                <button class="linkbtn" id="btn-backfill" type="button">重建档案</button>
+              </div>
+            </div>
+
+            <div class="field desktop-only-action" id="output-field-wrap">
+              <label for="set-output">下载目录</label>
               <div class="inputrow">
-                <input id="set-cookies" type="text" spellcheck="false" aria-label="Cookie 文件路径">
-                <button class="btn ghost btn-sm" id="btn-browse-cookies" type="button">浏览…</button>
-                <button class="btn ghost btn-sm" id="btn-upload-cookies" type="button" title="从当前浏览器选择并上传 cookies.txt">上传</button>
+                <input id="set-output" type="text" spellcheck="false">
+                <button class="btn ghost btn-sm" id="btn-browse-output" type="button">浏览</button>
               </div>
-              <p class="fieldnote">支持本地路径选择，也可从远程/手机浏览器上传 cookies.txt</p>
             </div>
-            <div id="cookies-browser-box" class="cookies-box hidden">
-              <select id="set-cookies-browser" aria-label="选择浏览器">
-                <option value="chrome">Google Chrome</option>
-                <option value="edge">Microsoft Edge</option>
-                <option value="firefox">Mozilla Firefox</option>
-                <option value="brave">Brave</option>
-                <option value="opera">Opera</option>
-                <option value="chromium">Chromium</option>
-                <option value="safari">Safari</option>
+
+            <div class="field">
+              <label for="set-proxy-mode">网络与代理</label>
+              <select id="set-proxy-mode">
+                <option value="off">香港直连（推荐）</option>
+                <option value="auto">自动探测（7890 在线时使用）</option>
+                <option value="manual">手动指定代理</option>
               </select>
-              <p class="fieldnote">等同 CLI 参数：--cookies-from-browser</p>
+              <input id="set-proxy-addr" type="text" spellcheck="false" aria-label="代理地址" placeholder="socks5h://127.0.0.1:7890">
             </div>
-          </div>
 
-          <div class="field">
-            <label for="set-proxy-mode">代理</label>
-            <select id="set-proxy-mode">
-              <option value="auto">自动（7890 在线时使用）</option>
-              <option value="manual">手动指定</option>
-              <option value="off">直连（不推荐）</option>
-            </select>
-            <input id="set-proxy-addr" type="text" spellcheck="false" aria-label="代理地址">
-          </div>
+            <label class="switchrow" for="set-incremental">
+              <span class="switch-copy">
+                <strong>增量抓取</strong>
+                <small>跳过归档内已下载或已同步云端的内容</small>
+              </span>
+              <span class="switch"><input type="checkbox" id="set-incremental" checked><i aria-hidden="true"></i></span>
+            </label>
 
-          <label class="switchrow" for="set-incremental">
-            <span>增量下载（跳过已下载）</span>
-            <span class="switch"><input type="checkbox" id="set-incremental" checked><i aria-hidden="true"></i></span>
-          </label>
-          <p class="fieldnote">按推文 ID + 媒体序号记录；重复运行仅抓取新增内容</p>
-
-          <div class="field">
-            <label for="set-stop-after-skips">连续跳过多少条后停止</label>
-            <div class="stepper">
-              <button type="button" data-step="-5" data-for="set-stop-after-skips" aria-label="减少"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
-              <input id="set-stop-after-skips" type="number" min="0" max="500" step="5" value="20">
-              <button type="button" data-step="5" data-for="set-stop-after-skips" aria-label="增加"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
-            </div>
-            <p class="fieldnote">0 = 完整扫描不提前停止；旧账号首次抓取建议设为 0</p>
-          </div>
-
-          <div class="field-row">
-            <div class="field">
-              <label for="set-limit">每个账号最近 N 条</label>
-              <div class="stepper">
-                <button type="button" data-step="-10" data-for="set-limit" aria-label="减少"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
-                <input id="set-limit" type="number" min="0" max="10000" step="10" value="0">
-                <button type="button" data-step="10" data-for="set-limit" aria-label="增加"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+            <div class="field-row">
+              <div class="field">
+                <label for="set-stop-after-skips">连续跳过上限</label>
+                <div class="stepper">
+                  <button type="button" data-step="-5" data-for="set-stop-after-skips" aria-label="减少"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+                  <input id="set-stop-after-skips" type="number" min="0" max="500" step="5" value="20">
+                  <button type="button" data-step="5" data-for="set-stop-after-skips" aria-label="增加"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+                </div>
               </div>
-              <p class="fieldnote">0 = 全部</p>
-            </div>
-            <div class="field">
-              <label for="set-concurrency">同时下载账号数</label>
-              <div class="stepper">
-                <button type="button" data-step="-1" data-for="set-concurrency" aria-label="减少"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
-                <input id="set-concurrency" type="number" min="1" max="5" step="1" value="2">
-                <button type="button" data-step="1" data-for="set-concurrency" aria-label="增加"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+              <div class="field">
+                <label for="set-limit">最近 N 条 (0=全部)</label>
+                <div class="stepper">
+                  <button type="button" data-step="-10" data-for="set-limit" aria-label="减少"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+                  <input id="set-limit" type="number" min="0" max="10000" step="10" value="0">
+                  <button type="button" data-step="10" data-for="set-limit" aria-label="增加"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+                </div>
               </div>
-              <p class="fieldnote">1–5 个</p>
             </div>
-          </div>
 
-          <label class="switchrow" for="set-media-only">
-            <span>只抓取含媒体的推文页面</span>
-            <span class="switch"><input type="checkbox" id="set-media-only" checked><i aria-hidden="true"></i></span>
-          </label>
-
-          <div class="field">
-            <label for="set-max-retries">每个文件最多重试</label>
-            <div class="stepper">
-              <button type="button" data-step="-1" data-for="set-max-retries" aria-label="减少"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
-              <input id="set-max-retries" type="number" min="1" max="5" step="1" value="3">
-              <button type="button" data-step="1" data-for="set-max-retries" aria-label="增加"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+            <div class="field-row">
+              <div class="field">
+                <label for="set-concurrency">并发账号数</label>
+                <div class="stepper">
+                  <button type="button" data-step="-1" data-for="set-concurrency" aria-label="减少"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+                  <input id="set-concurrency" type="number" min="1" max="5" step="1" value="2">
+                  <button type="button" data-step="1" data-for="set-concurrency" aria-label="增加"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+                </div>
+              </div>
+              <div class="field">
+                <label for="set-max-retries">单文件重试上限</label>
+                <div class="stepper">
+                  <button type="button" data-step="-1" data-for="set-max-retries" aria-label="减少"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+                  <input id="set-max-retries" type="number" min="1" max="5" step="1" value="3">
+                  <button type="button" data-step="1" data-for="set-max-retries" aria-label="增加"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+                </div>
+              </div>
             </div>
-            <p class="fieldnote">达到上限后停止自动重试</p>
-          </div>
 
-          <label class="switchrow" for="set-auto-retry">
-            <span>轮次结束后自动重试失败</span>
-            <span class="switch"><input type="checkbox" id="set-auto-retry"><i aria-hidden="true"></i></span>
-          </label>
+            <label class="switchrow" for="set-media-only">
+              <span class="switch-copy"><strong>只抓取 /media 媒体页</strong></span>
+              <span class="switch"><input type="checkbox" id="set-media-only" checked><i aria-hidden="true"></i></span>
+            </label>
 
-          <details class="cmd-preview" open>
-            <summary>等效 CMD 命令行预览</summary>
-            <code id="cmd-preview-text"></code>
-            <div class="cmd-preview-actions">
-              <button class="btn ghost btn-sm" id="btn-copy-cmd" type="button">
-                <svg id="copy-cmd-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                <span id="copy-cmd-label">复制命令</span>
-              </button>
-              <button class="btn ghost btn-sm" id="btn-fill-cmd" type="button">填入命令栏</button>
+            <label class="switchrow" for="set-auto-retry">
+              <span class="switch-copy"><strong>轮次结束后自动重试失败</strong></span>
+              <span class="switch"><input type="checkbox" id="set-auto-retry"><i aria-hidden="true"></i></span>
+            </label>
+
+            <div class="field">
+              <span class="field-label">目录保存结构</span>
+              <div class="seg" role="group" aria-label="文件夹结构">
+                <button class="seg-btn active" id="layout-per-user" type="button" aria-pressed="true">按用户名分</button>
+                <button class="seg-btn" id="layout-flat" type="button" aria-pressed="false">平铺目录</button>
+              </div>
             </div>
-          </details>
 
-          <button class="btn ghost wide btn-sm" id="btn-reset-settings" type="button">恢复默认设置</button>
-        </div>
-      </section>
+            <details class="cmd-preview">
+              <summary>等效 CLI 命令预览</summary>
+              <code class="mono" id="cmd-preview-text"></code>
+              <div class="btnrow">
+                <button class="btn ghost btn-sm" id="btn-copy-cmd" type="button">
+                  <svg id="copy-cmd-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <span id="copy-cmd-label">复制命令</span>
+                </button>
+                <button class="btn ghost btn-sm" id="btn-fill-cmd" type="button">填入命令栏</button>
+              </div>
+            </details>
 
-      <!-- Card 3: Save Structure -->
-      <section class="panel tree-panel" aria-labelledby="tree-title">
-        <div class="panel-head">
-          <h2 id="tree-title">保存结构</h2>
-          <span class="tag tag-dim" id="tree-mode-tag">按用户名分</span>
-        </div>
-        <div class="panel-body tree-body">
-          <div class="seg" role="group" aria-label="文件夹结构">
-            <button class="seg-btn active" id="layout-per-user" type="button" aria-pressed="true">每个用户一个文件夹</button>
-            <button class="seg-btn" id="layout-flat" type="button" aria-pressed="false">全部同一文件夹</button>
+            <button class="btn ghost btn-sm wide" id="btn-reset-settings" type="button">恢复默认参数</button>
           </div>
-          <div class="tree-scroll" id="folder-tree" aria-live="polite"></div>
-          <p class="tree-note" id="tree-note"></p>
-        </div>
-      </section>
+        </section>
 
-    </aside>
+        <!-- Card 5: Account & Session Security -->
+        <section class="panel auth-panel auth-only" id="auth-panel" aria-labelledby="auth-panel-title">
+          <div class="panel-head">
+            <h2 id="auth-panel-title">账号与安全</h2>
+            <span class="tag tag-ok mono" id="auth-status-tag">已认证</span>
+          </div>
+          <div class="panel-body">
+            <div class="auth-user-banner">
+              <span>当前管理员</span>
+              <strong class="mono" id="auth-panel-user">admin</strong>
+            </div>
+
+            <form id="auth-change-form" class="auth-change-form" autocomplete="off">
+              <div class="field">
+                <label for="auth-current-pw">当前密码</label>
+                <div class="pw-wrap">
+                  <input id="auth-current-pw" type="password" autocomplete="current-password" placeholder="验证当前密码">
+                  <button class="pw-toggle" type="button" data-pw-target="auth-current-pw" aria-label="显示密码" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="auth-new-user">新用户名（可选）</label>
+                <input id="auth-new-user" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="留空则保持当前用户名">
+              </div>
+
+              <div class="field">
+                <label for="auth-new-pw">新密码（至少 6 位）</label>
+                <div class="pw-wrap">
+                  <input id="auth-new-pw" type="password" autocomplete="new-password" placeholder="输入新密码">
+                  <button class="pw-toggle" type="button" data-pw-target="auth-new-pw" aria-label="显示密码" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="auth-confirm-pw">确认新密码</label>
+                <input id="auth-confirm-pw" type="password" autocomplete="new-password" placeholder="再次输入新密码">
+              </div>
+
+              <button class="btn primary btn-sm wide" id="btn-change-password" type="submit">更新账号 / 密码</button>
+            </form>
+
+            <div class="btnrow">
+              <button class="btn ghost btn-sm" id="btn-panel-logout" type="button">退出当前设备</button>
+              <button class="btn danger-ghost btn-sm" id="btn-logout-all" type="button">注销全部设备</button>
+            </div>
+            <p class="fieldnote">修改密码后会立刻使其他设备历史会话失效；若忘记密码，可在服务器运行 setup_auth.sh 重置。</p>
+          </div>
+        </section>
+      </aside>
+    </div>
   </main>
 
-  <!-- 5. Global Status Bar -->
-  <footer class="statusbar">
-    <div class="sb-progress">
-      <div class="sb-track"><div class="sb-fill" id="overall-fill"></div></div>
-      <span id="overall-pct">0%</span>
+  <!-- Compact Footer -->
+  <footer class="app-footer">
+    <div class="wrap footer-inner">
+      <span id="sb-filter" class="mono">筛选: 不限</span>
+      <span id="sb-note">XDL Cloud · 直连 X.com 与 Google Drive</span>
     </div>
-    <span class="sb-stats" id="sb-stats">完成 0/0 · 0 个文件 · 失败文件 0</span>
-    <span class="sb-filter" id="sb-filter">筛选: 不限</span>
-    <span class="sb-time" id="sb-time">已用 00:00</span>
-    <span class="sb-note" id="sb-note">网页模式运行中 · 真实下载至设置目录</span>
   </footer>
 </div>
 
-<!-- 6. Mobile Bottom Navigation (<= 900px) -->
-<nav class="mobile-nav" id="mobile-nav" aria-label="移动端主导航">
+<!-- Mobile Safe-Area Bottom Action Bar -->
+<nav class="mob-nav" aria-label="移动端主导航">
   <button class="mob-btn active" type="button" data-mobile-tab="queue" aria-pressed="true">
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
     <span>队列</span>
-    <span class="mob-badge hidden" id="mob-queue-badge">0</span>
+    <span class="mob-badge mono hidden" id="mob-queue-badge">0</span>
+  </button>
+  <button class="mob-btn" type="button" data-mobile-tab="done" aria-pressed="false">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+    <span>媒体库</span>
+    <span class="mob-badge mono hidden" id="mob-done-badge">0</span>
   </button>
   <button class="mob-btn" type="button" data-mobile-tab="logs" aria-pressed="false">
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
     <span>日志</span>
     <span class="mob-dot hidden" id="mob-log-dot"></span>
   </button>
   <button class="mob-btn" type="button" data-mobile-tab="settings" aria-pressed="false">
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-    <span>过滤/设置</span>
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.86 1 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    <span>设置</span>
     <span class="mob-dot hidden" id="mob-filter-dot"></span>
-  </button>
-  <button class="mob-btn" type="button" data-mobile-tab="done" aria-pressed="false">
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-    <span>已完成</span>
-    <span class="mob-badge hidden" id="mob-done-badge">0</span>
   </button>
 </nav>
 
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
-<!-- Stop Service Modal -->
+<!-- Stop Local Service Modal (hidden in cloud mode) -->
 <div class="modal-backdrop hidden" id="close-modal">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="close-modal-title">
     <h3 id="close-modal-title">停止 XDL 网页服务</h3>
     <p id="close-modal-text">停止后本地下载服务将退出。确定停止？</p>
     <ul class="tasklist" id="close-modal-tasks" hidden></ul>
     <div class="modal-alert hidden" id="close-modal-alert">
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9L2.4 17a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
       <span id="close-modal-alert-text"></span>
     </div>
     <div class="modal-actions">
-      <button class="btn ghost" id="btn-modal-cancel" type="button">取消</button>
-      <button class="btn primary" id="btn-modal-ok" type="button">停止服务</button>
+      <button class="btn ghost btn-sm" id="btn-modal-cancel" type="button">取消</button>
+      <button class="btn primary btn-sm" id="btn-modal-ok" type="button">停止服务</button>
     </div>
   </div>
 </div>
@@ -591,14 +764,24 @@
         <h3 id="media-modal-title">媒体预览</h3>
         <span id="media-modal-sub" class="media-modal-sub"></span>
       </div>
-      <button class="iconbtn" id="media-modal-close" type="button" aria-label="关闭媒体预览">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
+      <div class="media-nav-group">
+        <button class="iconbtn" id="media-modal-prev" type="button" aria-label="上一个媒体" title="上一个 (←)">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button class="iconbtn" id="media-modal-next" type="button" aria-label="下一个媒体" title="下一个 (→)">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <button class="iconbtn" id="media-modal-close" type="button" aria-label="关闭媒体预览">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
     </div>
     <div class="media-stage" id="media-stage"></div>
     <div class="media-modal-actions">
       <button class="btn ghost btn-sm" id="media-modal-tweet" type="button">打开原推文</button>
-      <a class="btn primary btn-sm" id="media-modal-download" href="#" download>下载文件</a>
+      <a class="btn ghost btn-sm hidden" id="media-modal-drive" href="#" target="_blank" rel="noopener noreferrer">在 Google Drive 打开</a>
+      <button class="btn danger-ghost btn-sm" id="media-modal-delete" type="button">清理本地文件</button>
+      <a class="btn primary btn-sm" id="media-modal-download" href="#" download>下载到本地</a>
     </div>
   </div>
 </div>
@@ -606,12 +789,13 @@
 <input type="file" id="file-input" accept=".txt,text/plain" hidden>
 <input type="file" id="cookies-upload-input" accept=".txt,text/plain" hidden>
 
+<!-- Detail Drawer -->
 <div class="drawer-backdrop hidden" id="drawer-backdrop"></div>
 <aside class="drawer hidden" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
   <div class="drawer-head">
     <h3 id="drawer-title">@user</h3>
     <button class="iconbtn" id="drawer-close" type="button" aria-label="关闭详情">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
   </div>
   <div class="drawer-body" id="drawer-body"></div>

@@ -5,38 +5,66 @@ from __future__ import annotations
 
 import argparse
 import collections
+import concurrent.futures
+import configparser
+import getpass
 import json
 import mimetypes
 import os
 import re
 import shlex
+import shutil
+import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
+import urllib.error
 import urllib.request
 import webbrowser
+import zipfile
+from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 
 BASE_DIR = Path(__file__).resolve().parent
 APP_DIR = BASE_DIR / "xdl-gui"
-STATE_FILE = Path.home() / ".xdl" / "gui_state.json"
 DEFAULT_PORT = 8765
+CLOUD_MODE_ENV = os.environ.get("XDL_CLOUD_MODE", "").strip().lower() in {"1", "true", "yes"}
 
 sys.path.insert(0, str(BASE_DIR))
 import x_downloader as xdl  # noqa: E402
+import xdl_auth  # noqa: E402
+
+STATE_FILE = xdl.XDL_HOME / "gui_state.json"
+AUTH_FILE = xdl.XDL_HOME / "auth.json"
+AUTH_DB_FILE = xdl.XDL_HOME / "auth.sqlite3"
+RCLONE_CONFIG_FILE = xdl.XDL_HOME / "rclone.conf"
+CLOUD_TARGET_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}:[A-Za-z0-9_./-]{0,128}$")
+
+
+def sanitize_cloud_target(raw: str | None) -> str:
+    text = str(raw or "").strip().rstrip("/")
+    if (
+        not text
+        or text.startswith("-")
+        or ".." in text
+        or not CLOUD_TARGET_RE.fullmatch(text)
+    ):
+        return "gdrive:X_Download"
+    return text
 
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 FILE_RE = re.compile(
     r"([A-Za-z0-9_]{1,15})_(\d{4}-\d{2}-\d{2})"
-    r"(?:[ T]\d{2}_\d{2}_\d{2})?_(\d{15,20})_(\d+)\.([A-Za-z0-9]+)"
+    r"(?:[ T]\d{2}[:_-]\d{2}[:_-]\d{2})?_(\d{15,20})_(\d+)\.([A-Za-z0-9]+)"
 )
 USER_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 REASON_LABELS = {
@@ -333,8 +361,18 @@ def _extract_cmd_user(token: str) -> str | None:
 
 
 class AppState:
-    def __init__(self, state_file: Path = STATE_FILE):
+    def __init__(
+        self,
+        state_file: Path = STATE_FILE,
+        cloud_mode: bool | None = None,
+        require_auth: bool | None = None,
+        idle_timeout: int = 0,
+        start_background: bool = True,
+    ):
         self.lock = threading.RLock()
+        self.cloud_mode = CLOUD_MODE_ENV if cloud_mode is None else bool(cloud_mode)
+        self.auth_required = bool(self.cloud_mode or require_auth)
+        self.auth = xdl_auth.AuthManager(AUTH_FILE, AUTH_DB_FILE)
         self.state_file = Path(state_file)
         self.queue: list[dict] = []
         self.failures: list[dict] = []
@@ -354,6 +392,22 @@ class AppState:
         self.cmd_history: list[str] = []
         self._proxy_checked = 0.0
         self._proxy_online = False
+        self._rclone_checked = 0.0
+        self._rclone_info = {"installed": False, "configured": False, "remotes": []}
+        self.cloud_sync_lock = threading.Lock()
+        self.cloud_syncing = False
+        self.cloud_last_sync = {
+            "at": None,
+            "status": "idle",
+            "summary": "",
+            "files": 0,
+            "error": None,
+        }
+        self.cloud_folder_url: str = ""
+        self.cloud_folder_target: str = ""
+        self.cloud_user_folders: dict[str, str] = {}
+        self.idle_timeout = max(0, int(idle_timeout))
+        self.last_activity = time.monotonic()
         self.stop = threading.Event()
         self.dirty = threading.Event()
         self.allow_window_close = False
@@ -370,21 +424,27 @@ class AppState:
         }
         self.backfilled: set[str] = set()
         self.backfill_lock = threading.Lock()
+        self.thumb_backfill_lock = threading.Lock()
+        self.thumb_backfilling = False
         self.load()
         self.add_log("info", "XDL Web 工作台已就绪，支持 CLI 命令、实时日志与视频时长过滤")
-        threading.Thread(target=self._saver_loop, daemon=True).start()
-        threading.Thread(target=self._scheduler_loop, daemon=True).start()
-        threading.Thread(target=self._probe_gallery_dl, daemon=True).start()
-        threading.Thread(target=self._prepare_store, daemon=True).start()
+        if start_background:
+            threading.Thread(target=self._saver_loop, daemon=True).start()
+            threading.Thread(target=self._scheduler_loop, daemon=True).start()
+            threading.Thread(target=self._probe_gallery_dl, daemon=True).start()
+            threading.Thread(target=self._prepare_store, daemon=True).start()
+            if self.idle_timeout > 0:
+                threading.Thread(target=self._idle_watch_loop, daemon=True).start()
 
     def default_settings(self) -> dict:
         cookies = xdl.find_cookies_file()
+        default_cookies = str(xdl.XDL_HOME / "cookies.txt") if self.cloud_mode else (cookies or str(Path.home() / "Downloads" / "cookies.txt"))
         return {
             "output": xdl.DEFAULT_OUTPUT_DIR,
-            "cookies": cookies or str(Path.home() / "Downloads" / "cookies.txt"),
+            "cookies": cookies or default_cookies,
             "cookiesSource": "file",
             "cookiesBrowser": "chrome",
-            "proxyMode": "auto",
+            "proxyMode": "off" if self.cloud_mode else "auto",
             "proxyAddr": xdl.DEFAULT_PROXY,
             "limit": 0,
             "concurrency": 2,
@@ -397,6 +457,9 @@ class AppState:
             "durationFilterEnabled": False,
             "maxVideoDuration": 60,
             "layout": "per-user",
+            "cloudSyncEnabled": False,
+            "cloudSyncDeleteLocal": True,
+            "cloudSyncTarget": "gdrive:X_Download",
         }
 
     def _sanitize_settings_locked(self) -> None:
@@ -416,10 +479,17 @@ class AppState:
         s["cookiesSource"] = "browser" if source == "browser" else "file"
         browser = str(s.get("cookiesBrowser") or "chrome").lower()
         s["cookiesBrowser"] = browser if browser in xdl.SUPPORTED_BROWSERS else "chrome"
-        proxy_mode = str(s.get("proxyMode") or "auto").lower()
-        s["proxyMode"] = proxy_mode if proxy_mode in {"auto", "manual", "off"} else "auto"
+        proxy_mode = str(s.get("proxyMode") or ("off" if self.cloud_mode else "auto")).lower()
+        s["proxyMode"] = proxy_mode if proxy_mode in {"auto", "manual", "off"} else ("off" if self.cloud_mode else "auto")
         layout = str(s.get("layout") or "per-user").lower()
         s["layout"] = "flat" if layout == "flat" else "per-user"
+        s["cloudSyncEnabled"] = bool(s.get("cloudSyncEnabled", False))
+        s["cloudSyncDeleteLocal"] = bool(s.get("cloudSyncDeleteLocal", True))
+        s["cloudSyncTarget"] = sanitize_cloud_target(s.get("cloudSyncTarget"))
+        if self.cloud_mode:
+            s["output"] = str(Path(xdl.DEFAULT_OUTPUT_DIR).resolve())
+            s["cookies"] = str((xdl.XDL_HOME / "cookies.txt").resolve())
+            s["cookiesSource"] = "file"
 
     def load(self) -> None:
         if not self.state_file.exists():
@@ -441,6 +511,19 @@ class AppState:
         history = data.get("cmdHistory")
         if isinstance(history, list):
             self.cmd_history = [str(item) for item in history if str(item).strip()][-50:]
+        last_sync = data.get("cloudLastSync")
+        if isinstance(last_sync, dict):
+            self.cloud_last_sync.update(last_sync)
+        if isinstance(data.get("cloudFolderUrl"), str):
+            self.cloud_folder_url = data["cloudFolderUrl"].strip()
+        if isinstance(data.get("cloudFolderTarget"), str):
+            self.cloud_folder_target = data["cloudFolderTarget"].strip()
+        if isinstance(data.get("cloudUserFolders"), dict):
+            self.cloud_user_folders = {
+                str(k).lower(): str(v)
+                for k, v in data["cloudUserFolders"].items()
+                if k and v
+            }
         for item in self.queue:
             if item.get("status") in {"active", "waiting"}:
                 item["status"] = "paused"
@@ -449,8 +532,36 @@ class AppState:
             if failure.get("status") == "queued":
                 failure["status"] = "failed"
 
+    def touch_activity(self) -> None:
+        self.last_activity = time.monotonic()
+
+    def _is_work_active(self) -> bool:
+        with self.lock:
+            if self.cloud_syncing:
+                return True
+            if any(proc.poll() is None for proc in self.processes.values()):
+                return True
+            if any(item.get("status") == "active" for item in self.queue):
+                return True
+            if self.running and not self.paused and any(item.get("status") == "waiting" for item in self.queue):
+                return True
+            return False
+
+    def _idle_watch_loop(self) -> None:
+        while not self.stop.wait(5.0):
+            if self._is_work_active():
+                self.touch_activity()
+                continue
+            if self.idle_timeout > 0 and (time.monotonic() - self.last_activity) >= self.idle_timeout:
+                mins = max(1, round(self.idle_timeout / 60))
+                self.add_log("info", f"已连续 {mins} 分钟无操作变化，服务自动休眠以释放内存")
+                self.save()
+                self.stop.set()
+                break
+
     def add_log(self, level: str, text: str, user: str | None = None) -> dict:
         with self.lock:
+            self.last_activity = time.monotonic()
             self.log_seq += 1
             entry = {
                 "seq": self.log_seq,
@@ -522,6 +633,37 @@ class AppState:
                 "env": self.env_snapshot(),
             }
 
+    def probe_rclone(self, force: bool = False) -> dict:
+        if not force and time.time() - self._rclone_checked < 5:
+            return dict(self._rclone_info)
+        rclone_bin = shutil.which("rclone")
+        remotes: list[str] = []
+        configured = False
+        if rclone_bin and RCLONE_CONFIG_FILE.is_file():
+            try:
+                res = subprocess.run(
+                    [rclone_bin, "listremotes", "--config", str(RCLONE_CONFIG_FILE)],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if res.returncode == 0:
+                    remotes = [
+                        line.strip().rstrip(":")
+                        for line in (res.stdout or "").splitlines()
+                        if line.strip()
+                    ]
+                    configured = len(remotes) > 0
+            except Exception:
+                pass
+        self._rclone_info = {
+            "installed": bool(rclone_bin),
+            "configured": configured,
+            "remotes": remotes,
+        }
+        self._rclone_checked = time.time()
+        return dict(self._rclone_info)
+
     def env_snapshot(self) -> dict:
         cookies_source = self.settings.get("cookiesSource", "file")
         cookies_browser = self.settings.get("cookiesBrowser", "chrome")
@@ -539,7 +681,41 @@ class AppState:
             proxy_online = self._proxy_online
         else:
             proxy_online = proxy_mode == "manual"
+        try:
+            out_path = Path(self.settings.get("output") or xdl.DEFAULT_OUTPUT_DIR)
+            out_path.mkdir(parents=True, exist_ok=True)
+            du = shutil.disk_usage(str(out_path))
+            storage_info = {
+                "totalBytes": du.total,
+                "usedBytes": du.used,
+                "freeBytes": du.free,
+                "outputDir": str(out_path),
+            }
+        except OSError:
+            storage_info = {
+                "totalBytes": 0,
+                "usedBytes": 0,
+                "freeBytes": 0,
+                "outputDir": str(self.settings.get("output", "")),
+            }
+        rc = self.probe_rclone()
+        cloud_target = sanitize_cloud_target(self.settings.get("cloudSyncTarget"))
+        target_remote = cloud_target.split(":", 1)[0]
+        try:
+            cloud_stats = xdl.cloud_media_summary()
+        except Exception:
+            cloud_stats = {"files": 0, "bytes": 0}
+        try:
+            thumbs_info = xdl.thumbs_summary()
+        except Exception:
+            thumbs_info = {"count": 0, "bytes": 0, "missing": 0, "ffmpeg": False}
         return {
+            "cloudMode": self.cloud_mode,
+            "auth": {
+                "enabled": self.auth_required,
+                "configured": self.auth.is_configured(),
+                "username": self.auth.username(),
+            },
             "cookiesFound": cookies_found,
             "cookiesSource": cookies_source,
             "cookiesBrowser": cookies_browser,
@@ -549,6 +725,25 @@ class AppState:
             "filterSummary": describe_filter(self.settings),
             "serverUrl": self.server_url,
             "lanUrl": self.lan_url,
+            "storage": storage_info,
+            "cloudSync": {
+                "installed": rc["installed"],
+                "configured": rc["configured"],
+                "remotes": rc["remotes"],
+                "target": cloud_target,
+                "targetRemote": target_remote,
+                "targetConfigured": target_remote in rc["remotes"],
+                "folderUrl": self.cloud_folder_url,
+                "userFolders": dict(self.cloud_user_folders),
+                "verifiedCount": int(cloud_stats.get("files") or 0),
+                "verifiedBytes": int(cloud_stats.get("bytes") or 0),
+                "syncing": self.cloud_syncing,
+                "lastSync": dict(self.cloud_last_sync),
+            },
+            "thumbs": {
+                **thumbs_info,
+                "backfilling": self.thumb_backfilling,
+            },
             "store": {
                 **self.store_summary,
                 "ready": self.store_ready,
@@ -585,10 +780,57 @@ class AppState:
                 }
                 self._refresh_item_counts_locked()
                 self.store_ready = True
+                target = sanitize_cloud_target(self.settings.get("cloudSyncTarget"))
+                output_root = Path(self.settings["output"]).resolve()
+                need_cloud_reconcile = (
+                    summary["media"] == 0
+                    or not self.cloud_folder_url
+                    or not self.cloud_user_folders
+                )
             if result["files"]:
                 msg = f"XDL 已标记 {result['files']} 个历史文件（{summary['tweets']} 条推文）"
                 print(msg, flush=True)
                 self.add_log("info", msg)
+
+            if need_cloud_reconcile:
+                rclone_bin = shutil.which("rclone")
+                rc = self.probe_rclone(force=True)
+                remote_name = target.split(":", 1)[0]
+                if rclone_bin and remote_name in rc.get("remotes", []):
+                    entries: list[dict] = []
+                    updated = 0
+                    try:
+                        entries, updated = self._reconcile_cloud_index(
+                            rclone_bin, target, output_root
+                        )
+                        summary = xdl.media_summary()
+                        with self.lock:
+                            self.store_summary = {
+                                "media": summary["media"],
+                                "tweets": summary["tweets"],
+                                "bytes": summary["bytes"],
+                                "users": max(self.store_summary.get("users", 0), len(self.cloud_user_folders)),
+                                "archive": str(xdl.ARCHIVE_FILE),
+                            }
+                            self._refresh_item_counts_locked()
+                            if self.cloud_last_sync.get("status") == "idle" and entries:
+                                self.cloud_last_sync = {
+                                    "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "status": "ok",
+                                    "summary": f"已从 {target} 核对 {len(entries)} 个云端媒体",
+                                    "files": len(entries),
+                                    "updated": updated,
+                                    "error": None,
+                                }
+                        if entries:
+                            self.add_log("info", f"[cloud-sync] 启动时已核对 {len(entries)} 个 Google Drive 媒体（同步 {updated} 条档案）")
+                    except Exception as exc:
+                        self.add_log("warn", f"[cloud-sync] 启动核对云端文件失败: {exc}")
+
+                    try:
+                        self._resolve_root_folder_url(rclone_bin, target, force=False)
+                    except Exception as exc:
+                        self.add_log("warn", f"[cloud-sync] 启动解析云端根目录失败: {exc}")
             self.mark_dirty()
         except Exception:
             traceback.print_exc()
@@ -607,6 +849,22 @@ class AppState:
     def backfill_all(self) -> dict:
         with self.backfill_lock:
             result = xdl.backfill_output(self.settings["output"])
+            cloud_entries: list[dict] = []
+            with self.lock:
+                target = sanitize_cloud_target(self.settings.get("cloudSyncTarget"))
+                output_root = Path(self.settings["output"]).resolve()
+            rclone_bin = shutil.which("rclone")
+            rc = self.probe_rclone(force=True)
+            remote_name = target.split(":", 1)[0]
+            if rclone_bin and remote_name in rc.get("remotes", []):
+                try:
+                    cloud_entries, _ = self._reconcile_cloud_index(rclone_bin, target, output_root)
+                except Exception as exc:
+                    self.add_log("warn", f"[cloud-sync] 重建档案时核对云端文件失败: {exc}")
+                try:
+                    self._resolve_root_folder_url(rclone_bin, target, force=False)
+                except Exception as exc:
+                    self.add_log("warn", f"[cloud-sync] 重建档案时解析根目录失败: {exc}")
             summary = xdl.media_summary()
             with self.lock:
                 self.store_summary = {
@@ -618,16 +876,22 @@ class AppState:
                 }
                 self._refresh_item_counts_locked()
                 self.store_ready = True
-                self.add_log("info", f"已重建本地下载档案：{summary['media']} 个媒体 / {summary['tweets']} 条推文")
+                self.add_log(
+                    "info",
+                    f"已重建下载档案：{summary['media']} 个媒体 / {summary['tweets']} 条推文"
+                    + (f"（含云端 {len(cloud_entries)} 个）" if cloud_entries else ""),
+                )
                 self.mark_dirty()
         return {
             "files": result["files"],
+            "cloudFiles": len(cloud_entries),
             "media": summary["media"],
             "tweets": summary["tweets"],
             "users": result["users"],
         }
 
     def mark_dirty(self) -> None:
+        self.last_activity = time.monotonic()
         self.dirty.set()
 
     def shutdown(self) -> None:
@@ -667,6 +931,10 @@ class AppState:
                 "round": self.round,
                 "roundSummary": self.round_summary,
                 "cmdHistory": self.cmd_history[-50:],
+                "cloudLastSync": dict(self.cloud_last_sync),
+                "cloudFolderUrl": self.cloud_folder_url,
+                "cloudFolderTarget": self.cloud_folder_target,
+                "cloudUserFolders": dict(self.cloud_user_folders),
             }
         try:
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -904,11 +1172,17 @@ class AppState:
                         return tokens[idx]
 
                     if low in {"-o", "--output"}:
+                        if self.cloud_mode:
+                            raise ValueError("云端模式已锁定服务器下载目录，禁止修改 -o/--output")
                         patch["output"] = next_val()
                     elif low in {"-c", "--cookies"}:
+                        if self.cloud_mode:
+                            raise ValueError("云端模式已锁定 Cookie 路径，请在界面中上传或填写 Cookie")
                         patch["cookiesSource"] = "file"
                         patch["cookies"] = next_val()
                     elif low == "--cookies-from-browser":
+                        if self.cloud_mode:
+                            raise ValueError("云端模式不支持读取客户端浏览器 Cookie，请使用界面导入功能")
                         browser = next_val().lower()
                         if browser not in xdl.SUPPORTED_BROWSERS:
                             raise ValueError(f"不支持的浏览器: {browser}")
@@ -1245,7 +1519,7 @@ class AppState:
                             failure["status"] = "done"
                             recovered += 1
 
-            item["files"] = count_user_files(Path(output), user, flat)
+            local_files_count = count_user_files(Path(output), user, flat)
             item["recentFiles"] = recent_files(
                 Path(output) if flat else (Path(output) / user),
                 user=user,
@@ -1255,9 +1529,10 @@ class AppState:
                 item["downloadedTotal"] = xdl.media_count(user)
                 item["recentMedia"] = xdl.recent_media(user, 6)
             except Exception:
-                item["downloadedTotal"] = int(item.get("downloadedTotal") or item["files"])
+                item["downloadedTotal"] = int(item.get("downloadedTotal") or local_files_count)
                 if run_stats["recentMedia"]:
                     item["recentMedia"] = run_stats["recentMedia"]
+            item["files"] = max(local_files_count, int(item.get("downloadedTotal") or 0))
             item["newFiles"] = int(run_stats["newFiles"])
             item["skippedFiles"] = int(run_stats["skippedFiles"])
             item["lastRunAt"] = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -1299,6 +1574,13 @@ class AppState:
                 item["retryOnly"] = True
             self.processes.pop(item_id, None)
             self.mark_dirty()
+
+        if settings.get("cloudSyncEnabled") and (run_stats["newFiles"] > 0 or local_files_count > 0):
+            threading.Thread(
+                target=self.sync_to_cloud,
+                kwargs={"user": user, "trigger": "auto"},
+                daemon=True,
+            ).start()
 
     def _run_gallery(
         self,
@@ -1377,7 +1659,7 @@ class AppState:
         before = xdl.snapshot_file_map(media_dir)
         config = xdl.build_config(user, str(output_dir), cookies_config, args)
         css = user.replace("/", "_")
-        config_path = Path(os.environ.get("TEMP", ".")) / f"xdl_gui_{css}_{os.getpid()}_{time.time_ns()}.json"
+        config_path = Path(tempfile.gettempdir()) / f"xdl_gui_{css}_{os.getpid()}_{time.time_ns()}.json"
         log_path = config_path.with_suffix(".log")
         config_path.write_text(
             json.dumps(config, indent=2, ensure_ascii=False),
@@ -1491,6 +1773,13 @@ class AppState:
             and not is_tweet
             and count_user_files(output_dir, user, flat_layout) == 0
         ):
+            if skipped > 0 or len(new_files) > 0 or int(stats.get("totalMedia") or 0) > 0:
+                self.add_log(
+                    "info",
+                    f"@{user} 增量检查完成，暂无新增媒体（已跳过 {skipped} 条，累计归档 {stats['totalMedia']} 个）",
+                    user=user,
+                )
+                return True, [], stats
             if has_filter:
                 self.add_log(
                     "warn",
@@ -1670,6 +1959,829 @@ class AppState:
         if self.settings.get("autoRetry") and retryable:
             self.retry_failures([failure["id"] for failure in retryable])
 
+    # ---------- Google Drive cloud sync (rclone) ----------
+
+    def test_cloud_sync(self) -> dict:
+        rclone_bin = shutil.which("rclone")
+        if not rclone_bin:
+            return {"ok": False, "error": "服务器尚未安装 rclone"}
+        rc = self.probe_rclone(force=True)
+        target = sanitize_cloud_target(self.settings.get("cloudSyncTarget"))
+        remote_name = target.split(":", 1)[0]
+        if remote_name not in rc["remotes"]:
+            return {
+                "ok": False,
+                "unconfigured": True,
+                "remote": remote_name,
+                "target": target,
+                "error": f"尚未配置 Google Drive 远端 '{remote_name}'，请在服务器终端运行 bash /opt/X_Download/setup_gdrive.sh",
+            }
+        quota = None
+        try:
+            about = subprocess.run(
+                [rclone_bin, "about", f"{remote_name}:", "--config", str(RCLONE_CONFIG_FILE), "--json"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if about.returncode == 0 and about.stdout.strip():
+                data = json.loads(about.stdout)
+                quota = {
+                    "total": data.get("total"),
+                    "used": data.get("used"),
+                    "free": data.get("free"),
+                }
+            else:
+                lsd = subprocess.run(
+                    [rclone_bin, "lsd", f"{remote_name}:", "--config", str(RCLONE_CONFIG_FILE), "--max-depth", "1"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                if lsd.returncode != 0:
+                    err = clean_line(lsd.stderr or lsd.stdout or "连接测试失败")
+                    return {"ok": False, "remote": remote_name, "target": target, "error": err}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "remote": remote_name, "target": target, "error": "连接 Google Drive 超时"}
+        except Exception as exc:
+            return {"ok": False, "remote": remote_name, "target": target, "error": str(exc)}
+
+        folder_url = ""
+        try:
+            folder_url = self._resolve_root_folder_url(rclone_bin, target, force=False)
+        except Exception:
+            folder_url = self.cloud_folder_url
+        try:
+            verified_count = int(xdl.cloud_media_summary().get("files") or 0)
+        except Exception:
+            verified_count = 0
+
+        self.add_log("ok", f"[cloud-sync] Google Drive ({remote_name}:) 连通性测试通过")
+        self.mark_dirty()
+        return {
+            "ok": True,
+            "remote": remote_name,
+            "target": target,
+            "quota": quota,
+            "folderUrl": folder_url,
+            "verifiedCount": verified_count,
+            "message": f"Google Drive ({remote_name}:) 连接正常",
+        }
+
+    def _resolve_root_folder_url(self, rclone_bin: str, target: str, force: bool = False) -> str:
+        with self.lock:
+            if not force and self.cloud_folder_url and self.cloud_folder_target == target:
+                return self.cloud_folder_url
+
+        remote_name, path_part = target.split(":", 1)
+        clean_path = path_part.strip("/")
+        folder_url = ""
+        if not clean_path:
+            folder_url = "https://drive.google.com/drive/my-drive"
+        else:
+            parent_path, leaf = (
+                clean_path.rsplit("/", 1) if "/" in clean_path else ("", clean_path)
+            )
+            parent_target = f"{remote_name}:{parent_path}"
+            ls_parent = subprocess.run(
+                [
+                    rclone_bin, "lsjson",
+                    "--config", str(RCLONE_CONFIG_FILE),
+                    "--dirs-only", "--no-modtime", "--no-mimetype",
+                    parent_target,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=90,
+            )
+            if ls_parent.returncode == 0 and ls_parent.stdout.strip():
+                for d in json.loads(ls_parent.stdout):
+                    if isinstance(d, dict) and d.get("Name") == leaf and d.get("ID"):
+                        folder_url = f"https://drive.google.com/drive/folders/{d['ID']}"
+                        break
+
+        with self.lock:
+            if folder_url:
+                self.cloud_folder_url = folder_url
+                self.cloud_folder_target = target
+            return self.cloud_folder_url
+
+    @staticmethod
+    def _parse_rclone_modtime(raw: str | None) -> str:
+        text = str(raw or "").strip()
+        if not text:
+            return ""
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone()
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return ""
+
+    def _reconcile_cloud_index(
+        self,
+        rclone_bin: str,
+        target: str,
+        output_root: Path,
+        user: str | None = None,
+        remote_dest: str | None = None,
+    ) -> tuple[list[dict], int]:
+        scan_target = remote_dest or target
+        entries: list[dict] = []
+        found_user_folders: dict[str, str] = {}
+        lsjson = subprocess.run(
+            [
+                rclone_bin, "lsjson",
+                "--config", str(RCLONE_CONFIG_FILE),
+                "-R", "--fast-list", "--no-mimetype",
+                scan_target,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=180,
+        )
+        if lsjson.returncode == 0 and lsjson.stdout.strip():
+            items = json.loads(lsjson.stdout)
+            if isinstance(items, list):
+                for entry in items:
+                    if not isinstance(entry, dict):
+                        continue
+                    name = str(entry.get("Name") or "").strip()
+                    rel_path = str(entry.get("Path") or name).strip()
+                    file_id = str(entry.get("ID") or "").strip()
+                    if entry.get("IsDir"):
+                        if not user and "/" not in rel_path and name and file_id and USER_RE.fullmatch(name):
+                            found_user_folders[name.lower()] = (
+                                f"https://drive.google.com/drive/folders/{file_id}"
+                            )
+                        continue
+                    if not name:
+                        continue
+                    cloud_url = f"https://drive.google.com/file/d/{file_id}/view" if file_id else ""
+                    item_user = user or ""
+                    if not item_user and "/" in rel_path:
+                        candidate = rel_path.split("/", 1)[0]
+                        if USER_RE.fullmatch(candidate):
+                            item_user = candidate
+                    if not item_user:
+                        parsed_name = xdl.parse_media_name(name)
+                        if parsed_name:
+                            item_user = parsed_name["user"]
+                    local_path = (
+                        str(output_root / item_user / name)
+                        if item_user
+                        else str(output_root / name)
+                    )
+                    local_exists = (
+                        (bool(item_user) and (output_root / item_user / name).is_file())
+                        or (output_root / name).is_file()
+                    )
+                    entries.append({
+                        "username": item_user,
+                        "filename": name,
+                        "cloudFileId": file_id,
+                        "cloudUrl": cloud_url,
+                        "cloudRemote": f"{scan_target.rstrip('/')}/{rel_path}",
+                        "localDeleted": not local_exists,
+                        "size": int(entry.get("Size") or 0),
+                        "downloadedAt": self._parse_rclone_modtime(entry.get("ModTime")),
+                        "localPath": local_path,
+                    })
+        if found_user_folders:
+            with self.lock:
+                self.cloud_user_folders.update(found_user_folders)
+        updated = xdl.mark_media_cloud_synced(entries) if entries else 0
+        return entries, updated
+
+    def sync_to_cloud(self, user: str | None = None, trigger: str = "auto") -> dict:
+        if trigger == "manual":
+            if not self.cloud_sync_lock.acquire(blocking=False):
+                return {"ok": False, "busy": True, "error": "云盘同步正在进行中，请稍候"}
+        else:
+            self.cloud_sync_lock.acquire()
+
+        self.cloud_syncing = True
+        self.mark_dirty()
+        try:
+            rclone_bin = shutil.which("rclone")
+            if not rclone_bin:
+                err = "服务器未安装 rclone，无法执行云盘同步"
+                self.cloud_last_sync = {
+                    "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "status": "error",
+                    "summary": err,
+                    "files": 0,
+                    "error": err,
+                }
+                self.add_log("error", f"[cloud-sync] {err}", user=user)
+                return {"ok": False, "error": err}
+
+            rc = self.probe_rclone(force=True)
+            with self.lock:
+                target = sanitize_cloud_target(self.settings.get("cloudSyncTarget"))
+                delete_local = bool(self.settings.get("cloudSyncDeleteLocal", True))
+                flat = self.settings.get("layout") == "flat"
+                output_root = Path(self.settings["output"]).resolve()
+
+            remote_name = target.split(":", 1)[0]
+            if remote_name not in rc["remotes"]:
+                err = f"Google Drive 远端 '{remote_name}' 尚未授权，请先运行 bash /opt/X_Download/setup_gdrive.sh"
+                self.cloud_last_sync = {
+                    "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "status": "unconfigured",
+                    "summary": err,
+                    "files": 0,
+                    "error": err,
+                }
+                self.add_log("warn", f"[cloud-sync] {err}", user=user)
+                return {"ok": False, "unconfigured": True, "error": err}
+
+            if user and not flat:
+                local_src = output_root / user
+                remote_dest = f"{target.rstrip('/')}/{user}"
+                user_filter = None
+            else:
+                local_src = output_root
+                remote_dest = target.rstrip("/")
+                user_filter = f"{user}_*" if (user and flat) else None
+
+            pending_files: list[Path] = []
+            if local_src.is_dir():
+                if user_filter:
+                    pending_files = [
+                        p for p in local_src.iterdir()
+                        if is_user_media_file(p, user, flat=True)
+                    ]
+                else:
+                    pending_files = [
+                        p for p in local_src.rglob("*")
+                        if p.is_file() and p.suffix.lower() not in {".part", ".tmp"}
+                    ]
+
+            if not pending_files:
+                if trigger != "manual":
+                    return {"ok": True, "synced": 0, "message": "本地暂无待同步文件"}
+                folder_url = ""
+                try:
+                    folder_url = self._resolve_root_folder_url(rclone_bin, target, force=False)
+                except Exception as exc:
+                    self.add_log("warn", f"[cloud-sync] 解析云端目录 ID 失败: {exc}", user=user)
+                entries: list[dict] = []
+                updated = 0
+                try:
+                    entries, updated = self._reconcile_cloud_index(
+                        rclone_bin, target, output_root, user=user, remote_dest=remote_dest
+                    )
+                except Exception as exc:
+                    self.add_log("warn", f"[cloud-sync] 核对云端文件失败: {exc}", user=user)
+                summary = xdl.media_summary()
+                with self.lock:
+                    self.store_summary.update({
+                        "media": summary["media"],
+                        "tweets": summary["tweets"],
+                        "bytes": summary["bytes"],
+                    })
+                    self._refresh_item_counts_locked()
+                    self.cloud_last_sync = {
+                        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "ok",
+                        "summary": f"本地无待传文件 · 云端已核对 {len(entries)} 个文件（更新 {updated} 条档案）",
+                        "files": len(entries),
+                        "updated": updated,
+                        "error": None,
+                    }
+                    self.add_log(
+                        "info",
+                        f"[cloud-sync] {self.cloud_last_sync['summary']}",
+                        user=user,
+                    )
+                    self.mark_dirty()
+                return {
+                    "ok": True,
+                    "synced": len(entries),
+                    "updated": updated,
+                    "folderUrl": folder_url or self.cloud_folder_url,
+                    "target": remote_dest,
+                }
+
+            try:
+                if user and not flat:
+                    xdl.backfill_directory(local_src, user)
+                else:
+                    xdl.backfill_output(output_root)
+            except Exception:
+                pass
+
+            try:
+                thumb_ready = xdl.ensure_thumbs_for_paths(pending_files, username=user)
+                if thumb_ready:
+                    self.add_log("info", f"[thumbs] 已为 {thumb_ready} 个待同步媒体生成本地微缩略图", user=user)
+            except Exception as exc:
+                self.add_log("warn", f"[thumbs] 同步前生成微缩略图异常: {exc}", user=user)
+
+            action = "move" if delete_local else "copy"
+            self.add_log(
+                "info",
+                f"[cloud-sync] 开始将 {len(pending_files)} 个文件上传至 {remote_dest}（{'上传后释放本地' if delete_local else '保留本地副本'}）",
+                user=user,
+            )
+            cmd = [
+                rclone_bin,
+                action,
+                str(local_src),
+                remote_dest,
+                "--config", str(RCLONE_CONFIG_FILE),
+            ]
+            if user_filter:
+                cmd.extend([
+                    "--filter", "- *.part",
+                    "--filter", "- *.tmp",
+                    "--filter", f"+ {user_filter}",
+                    "--filter", "- *",
+                ])
+            else:
+                cmd.extend(["--exclude", "*.part", "--exclude", "*.tmp"])
+            if delete_local and not user_filter:
+                cmd.append("--delete-empty-src-dirs")
+            cmd.extend(["--checksum", "--stats=5s", "-v"])
+
+            lines: list[str] = []
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+            if proc.stdout:
+                for line in proc.stdout:
+                    cleaned = clean_line(line)
+                    if cleaned:
+                        lines.append(cleaned)
+                        if len(lines) > 200:
+                            lines = lines[-120:]
+                        lvl = "error" if ("error" in cleaned.lower() or "failed" in cleaned.lower()) else "info"
+                        self.add_log(lvl, f"[cloud-sync] {cleaned}", user=user)
+            rc_code = proc.wait()
+            if rc_code != 0:
+                err = clean_line(lines[-1]) if lines else f"rclone 退出码 {rc_code}"
+                self.cloud_last_sync = {
+                    "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "status": "error",
+                    "summary": f"同步失败：{err}",
+                    "files": 0,
+                    "error": err,
+                }
+                self.add_log("error", f"[cloud-sync] 同步失败：{err}", user=user)
+                self.mark_dirty()
+                return {"ok": False, "error": err}
+
+            if delete_local and user and not flat and local_src.is_dir():
+                try:
+                    if not any(local_src.iterdir()):
+                        local_src.rmdir()
+                except OSError:
+                    pass
+
+            folder_url = ""
+            try:
+                folder_url = self._resolve_root_folder_url(rclone_bin, target, force=False)
+            except Exception as exc:
+                self.add_log("warn", f"[cloud-sync] 读取云端目录链接失败: {exc}", user=user)
+
+            entries = []
+            updated = 0
+            try:
+                entries, updated = self._reconcile_cloud_index(
+                    rclone_bin, target, output_root, user=user, remote_dest=remote_dest
+                )
+            except Exception as exc:
+                self.add_log("warn", f"[cloud-sync] 读取云端文件 ID 失败: {exc}", user=user)
+
+            summary = xdl.media_summary()
+            with self.lock:
+                self.store_summary.update({
+                    "media": summary["media"],
+                    "tweets": summary["tweets"],
+                    "bytes": summary["bytes"],
+                })
+                self._refresh_item_counts_locked()
+                self.cloud_last_sync = {
+                    "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "status": "ok",
+                    "summary": f"已上传 {len(pending_files)} 个文件，云端已核对 {len(entries)} 个文件" + ("（本地已释放）" if delete_local else "（保留本地）"),
+                    "files": len(entries),
+                    "updated": updated,
+                    "error": None,
+                }
+                self.add_log(
+                    "ok",
+                    f"[cloud-sync] 同步完成：本次上传 {len(pending_files)} 个，云端已核对 {len(entries)} 个（更新 {updated} 条链接）" + ("，本地空间已回收" if delete_local else ""),
+                    user=user,
+                )
+                self.mark_dirty()
+            return {
+                "ok": True,
+                "synced": len(entries),
+                "uploaded": len(pending_files),
+                "updated": updated,
+                "folderUrl": folder_url or self.cloud_folder_url,
+                "target": remote_dest,
+                "deleteLocal": delete_local,
+            }
+        finally:
+            self.cloud_syncing = False
+            self.mark_dirty()
+            self.cloud_sync_lock.release()
+
+    def _read_gdrive_access_token(
+        self,
+        remote_name: str,
+        rclone_bin: str,
+        force_refresh: bool = False,
+    ) -> str | None:
+        def _parse_token() -> tuple[str | None, bool]:
+            if not RCLONE_CONFIG_FILE.is_file():
+                return None, False
+            cfg = configparser.ConfigParser(interpolation=None)
+            try:
+                cfg.read(str(RCLONE_CONFIG_FILE), encoding="utf-8")
+            except Exception:
+                return None, False
+            if not cfg.has_section(remote_name):
+                return None, False
+            if cfg.get(remote_name, "type", fallback="").strip().lower() != "drive":
+                return None, False
+            raw_tok = cfg.get(remote_name, "token", fallback="").strip()
+            if not raw_tok:
+                return None, False
+            try:
+                tok = json.loads(raw_tok)
+            except Exception:
+                return None, False
+            access = str(tok.get("access_token") or "").strip() or None
+            expired = False
+            exp_raw = str(tok.get("expiry") or "").strip()
+            if exp_raw:
+                try:
+                    exp_dt = datetime.fromisoformat(exp_raw.replace("Z", "+00:00"))
+                    if exp_dt.timestamp() <= time.time() + 60:
+                        expired = True
+                except Exception:
+                    pass
+            return access, expired
+
+        access_token, is_expired = _parse_token()
+        if force_refresh or not access_token or is_expired:
+            if rclone_bin and RCLONE_CONFIG_FILE.is_file():
+                try:
+                    subprocess.run(
+                        [
+                            rclone_bin, "lsd", f"{remote_name}:",
+                            "--config", str(RCLONE_CONFIG_FILE),
+                            "--max-depth", "1",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                    )
+                    access_token, _ = _parse_token()
+                except Exception:
+                    pass
+        return access_token
+
+    def _fetch_drive_thumbnail_links(
+        self,
+        remote_name: str,
+        rclone_bin: str,
+        rows: list[dict],
+    ) -> tuple[dict[str, str], str | None]:
+        wanted_ids = {str(r.get("cloudFileId") or "").strip() for r in rows if r.get("cloudFileId")}
+        if not wanted_ids:
+            return {}, None
+
+        token = self._read_gdrive_access_token(remote_name, rclone_bin, force_refresh=False)
+        if not token:
+            return {}, None
+
+        def _drive_get_json(url: str) -> dict | None:
+            nonlocal token
+            for attempt in range(2):
+                req = urllib.request.Request(
+                    url,
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=20) as resp:
+                        return json.loads(resp.read().decode("utf-8"))
+                except urllib.error.HTTPError as exc:
+                    if exc.code == 401 and attempt == 0:
+                        refreshed = self._read_gdrive_access_token(
+                            remote_name, rclone_bin, force_refresh=True
+                        )
+                        if refreshed:
+                            token = refreshed
+                            continue
+                    return None
+                except Exception:
+                    return None
+            return None
+
+        folder_ids: list[str] = []
+        seen_folders: set[str] = set()
+        with self.lock:
+            urls = list(self.cloud_user_folders.values())
+            if self.cloud_folder_url:
+                urls.append(self.cloud_folder_url)
+        for url in urls:
+            if "/folders/" not in str(url):
+                continue
+            fid = str(url).split("/folders/", 1)[1].split("?", 1)[0].strip("/")
+            if fid and fid not in seen_folders and re.fullmatch(r"[A-Za-z0-9_-]{8,128}", fid):
+                seen_folders.add(fid)
+                folder_ids.append(fid)
+
+        links: dict[str, str] = {}
+        for fid in folder_ids:
+            page_token = ""
+            while True:
+                params = {
+                    "q": f"'{fid}' in parents and trashed = false",
+                    "pageSize": "1000",
+                    "fields": "nextPageToken,files(id,thumbnailLink)",
+                }
+                if page_token:
+                    params["pageToken"] = page_token
+                url = "https://www.googleapis.com/drive/v3/files?" + urlencode(params)
+                data = _drive_get_json(url)
+                if not isinstance(data, dict):
+                    break
+                for item in data.get("files") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    item_id = str(item.get("id") or "").strip()
+                    tlink = str(item.get("thumbnailLink") or "").strip()
+                    if item_id in wanted_ids and tlink:
+                        links[item_id] = tlink
+                page_token = str(data.get("nextPageToken") or "").strip()
+                if not page_token or len(links) >= len(wanted_ids):
+                    break
+            if len(links) >= len(wanted_ids):
+                break
+
+        missing_ids = [fid for fid in wanted_ids if fid not in links]
+        for fid in missing_ids:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", fid):
+                continue
+            url = f"https://www.googleapis.com/drive/v3/files/{quote(fid, safe='')}?fields=id,thumbnailLink"
+            data = _drive_get_json(url)
+            if isinstance(data, dict):
+                tlink = str(data.get("thumbnailLink") or "").strip()
+                if tlink:
+                    links[fid] = tlink
+
+        return links, token
+
+    def backfill_cloud_thumbs(self, user: str | None = None) -> dict:
+        if not self.thumb_backfill_lock.acquire(blocking=False):
+            return {"ok": False, "busy": True, "error": "缩略图补全正在进行中，请稍候"}
+
+        self.thumb_backfilling = True
+        self.mark_dirty()
+        generated = 0
+        try:
+            if not shutil.which("ffmpeg"):
+                err = "服务器未安装 ffmpeg，无法生成微缩略图"
+                self.add_log("warn", f"[thumbs] {err}", user=user)
+                return {"ok": False, "error": err, "thumbs": xdl.thumbs_summary()}
+
+            missing = xdl.list_media_missing_thumbs(username=user)
+            if not missing:
+                summary = xdl.thumbs_summary()
+                return {"ok": True, "generated": 0, "remaining": 0, "thumbs": summary}
+
+            with self.lock:
+                target = sanitize_cloud_target(self.settings.get("cloudSyncTarget"))
+                flat = self.settings.get("layout") == "flat"
+                output_root = Path(self.settings["output"]).resolve()
+
+            cloud_pending: list[dict] = []
+            for row in missing:
+                uname = row.get("username") or ""
+                fname = row.get("filename") or ""
+                candidates: list[Path] = []
+                if row.get("path"):
+                    candidates.append(Path(row["path"]))
+                if uname and fname:
+                    candidates.append(output_root / uname / fname)
+                if fname:
+                    candidates.append(output_root / fname)
+                local_src = None
+                for cand in candidates:
+                    try:
+                        if cand.is_file() and cand.stat().st_size > 0:
+                            local_src = cand
+                            break
+                    except OSError:
+                        continue
+                if local_src is not None:
+                    if xdl.generate_thumbnail(local_src, row["key"]) is not None:
+                        generated += 1
+                    continue
+                if row.get("cloudSynced"):
+                    cloud_pending.append(row)
+
+            if cloud_pending:
+                rclone_bin = shutil.which("rclone")
+                rc = self.probe_rclone(force=True)
+                remote_name = target.split(":", 1)[0]
+                if rclone_bin and remote_name in rc.get("remotes", []):
+                    # Phase 2A: Fast Drive API thumbnailLink batch fetch -> local WebP cache
+                    thumb_links, access_token = self._fetch_drive_thumbnail_links(
+                        remote_name, rclone_bin, cloud_pending
+                    )
+                    fast_rows = [
+                        r for r in cloud_pending
+                        if r.get("cloudFileId") and r["cloudFileId"] in thumb_links
+                    ]
+                    succeeded_keys: set[str] = set()
+                    if fast_rows:
+                        self.add_log(
+                            "info",
+                            f"[thumbs] 正在通过 Drive 缩略图接口快速转换 {len(fast_rows)} 个云端封面…",
+                            user=user,
+                        )
+                        with tempfile.TemporaryDirectory(prefix="xdl_thumb_dl_") as dl_td:
+                            dl_root = Path(dl_td)
+
+                            def _fetch_fast_one(row: dict) -> str | None:
+                                key = row["key"]
+                                fid = row["cloudFileId"]
+                                link = re.sub(r"=s\d+$", "=s480", thumb_links[fid])
+                                img_bytes = None
+                                hdr_sets = (
+                                    [{"Authorization": f"Bearer {access_token}"}, {}]
+                                    if access_token
+                                    else [{}]
+                                )
+                                for hdrs in hdr_sets:
+                                    req = urllib.request.Request(link, headers=hdrs)
+                                    try:
+                                        with urllib.request.urlopen(req, timeout=20) as resp:
+                                            data = resp.read()
+                                            if len(data) >= 64:
+                                                img_bytes = data
+                                                break
+                                    except Exception:
+                                        continue
+                                if not img_bytes:
+                                    return None
+                                tmp_src = dl_root / f"{key}.jpg"
+                                try:
+                                    tmp_src.write_bytes(img_bytes)
+                                    if xdl.generate_thumbnail(tmp_src, key) is not None:
+                                        return key
+                                finally:
+                                    try:
+                                        tmp_src.unlink(missing_ok=True)
+                                    except OSError:
+                                        pass
+                                return None
+
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                                futs = [pool.submit(_fetch_fast_one, r) for r in fast_rows]
+                                for fut in concurrent.futures.as_completed(futs):
+                                    try:
+                                        res_key = fut.result()
+                                        if res_key:
+                                            succeeded_keys.add(res_key)
+                                            generated += 1
+                                    except Exception:
+                                        pass
+
+                    cloud_pending = [
+                        r for r in cloud_pending if r["key"] not in succeeded_keys
+                    ]
+
+                # Phase 2B: Batched rclone copy fallback for any remaining cloud files
+                if cloud_pending and rclone_bin and remote_name in rc.get("remotes", []):
+                    target_prefix = target.rstrip("/") + "/"
+                    rel_map: dict[str, dict] = {}
+                    name_map: dict[str, dict] = {}
+                    unique_rels: list[str] = []
+                    seen_rels: set[str] = set()
+                    for row in cloud_pending:
+                        remote_val = str(row.get("cloudRemote") or "").strip()
+                        if remote_val.startswith(target_prefix):
+                            rel = remote_val[len(target_prefix):].lstrip("/")
+                        elif row.get("username") and not flat:
+                            rel = f"{row['username']}/{row['filename']}"
+                        else:
+                            rel = row["filename"]
+                        if not rel:
+                            continue
+                        rel_map[rel] = row
+                        if row.get("filename"):
+                            name_map[row["filename"]] = row
+                        if rel not in seen_rels:
+                            seen_rels.add(rel)
+                            unique_rels.append(rel)
+
+                    if unique_rels:
+                        batch_size = 15
+                        self.add_log(
+                            "info",
+                            f"[thumbs] 回退拉取剩余 {len(unique_rels)} 个云端文件生成微缩略图…",
+                            user=user,
+                        )
+                        for idx in range(0, len(unique_rels), batch_size):
+                            batch = unique_rels[idx:idx + batch_size]
+                            with tempfile.TemporaryDirectory(prefix="xdl_thumb_bf_") as td:
+                                td_path = Path(td)
+                                tmp_media_dir = td_path / "media"
+                                tmp_media_dir.mkdir(parents=True, exist_ok=True)
+                                files_from = td_path / "files.txt"
+                                files_from.write_text("\n".join(batch) + "\n", encoding="utf-8")
+
+                                try:
+                                    cp_res = subprocess.run(
+                                        [
+                                            rclone_bin, "copy",
+                                            target, str(tmp_media_dir),
+                                            "--config", str(RCLONE_CONFIG_FILE),
+                                            "--files-from", str(files_from),
+                                            "--fast-list",
+                                            "--transfers", "2",
+                                        ],
+                                        capture_output=True,
+                                        text=True,
+                                        encoding="utf-8",
+                                        errors="replace",
+                                        timeout=300,
+                                    )
+                                    if cp_res.returncode != 0:
+                                        err_msg = clean_line(cp_res.stderr or cp_res.stdout or f"rclone exit {cp_res.returncode}")
+                                        self.add_log("warn", f"[thumbs] 批次拉取部分文件异常: {err_msg}", user=user)
+                                except Exception as exc:
+                                    self.add_log("warn", f"[thumbs] 批次拉取超时或失败: {exc}", user=user)
+
+                                work_items: list[tuple[Path, str]] = []
+                                for fpath in tmp_media_dir.rglob("*"):
+                                    if not fpath.is_file():
+                                        continue
+                                    rel_found = fpath.relative_to(tmp_media_dir).as_posix()
+                                    matched = rel_map.get(rel_found) or name_map.get(fpath.name)
+                                    if matched and matched.get("key"):
+                                        work_items.append((fpath, matched["key"]))
+
+                                def _build_one(item: tuple[Path, str]) -> bool:
+                                    fpath, key = item
+                                    try:
+                                        return xdl.generate_thumbnail(fpath, key) is not None
+                                    finally:
+                                        try:
+                                            fpath.unlink(missing_ok=True)
+                                        except OSError:
+                                            pass
+
+                                if work_items:
+                                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                                        futs = [pool.submit(_build_one, it) for it in work_items]
+                                        for fut in concurrent.futures.as_completed(futs):
+                                            try:
+                                                if fut.result():
+                                                    generated += 1
+                                            except Exception:
+                                                pass
+
+            remaining = len(xdl.list_media_missing_thumbs(username=user))
+            summary = xdl.thumbs_summary()
+            with self.lock:
+                self._refresh_item_counts_locked()
+            self.add_log(
+                "ok" if remaining == 0 else "info",
+                f"[thumbs] 已补全 {generated} 张本地微缩略图（现有 {summary['count']} 张 / {human_size(summary['bytes'])}，待补 {remaining} 个）",
+                user=user,
+            )
+            self.mark_dirty()
+            return {
+                "ok": True,
+                "generated": generated,
+                "remaining": remaining,
+                "thumbs": summary,
+            }
+        finally:
+            self.thumb_backfilling = False
+            self.mark_dirty()
+            self.thumb_backfill_lock.release()
+
 
 def count_user_files(output_dir: Path, user: str, flat: bool) -> int:
     if flat:
@@ -1698,6 +2810,26 @@ class Bridge:
         return str(result[0]) if result else None
 
 
+def _synthesize_netscape_cookies(auth_token: str, ct0: str) -> str:
+    token = str(auth_token or "").strip()
+    csrf = str(ct0 or "").strip()
+    if not token or not csrf:
+        raise ValueError("auth_token 和 ct0 均不能为空")
+    for label, val in (("auth_token", token), ("ct0", csrf)):
+        if len(val) > 512 or any(ch in val for ch in ("\r", "\n", "\t", " ")):
+            raise ValueError(f"{label} 格式无效，请仅填入 Cookie 值本身")
+        if not val.isascii() or not val.isprintable():
+            raise ValueError(f"{label} 包含非法字符")
+    lines = [
+        "# Netscape HTTP Cookie File",
+        "# Generated by XDL Web",
+    ]
+    for domain in (".x.com", ".twitter.com"):
+        lines.append(f"{domain}\tTRUE\t/\tTRUE\t2147483647\tauth_token\t{token}")
+        lines.append(f"{domain}\tTRUE\t/\tTRUE\t2147483647\tct0\t{csrf}")
+    return "\n".join(lines) + "\n"
+
+
 class Handler(SimpleHTTPRequestHandler):
     app: AppState
 
@@ -1719,18 +2851,64 @@ class Handler(SimpleHTTPRequestHandler):
             return str(APP_DIR / "index.html")
         return str(target)
 
-    def _json(self, payload, status=200):
+    def _client_ip(self) -> str:
+        peer = self.client_address[0] if self.client_address else ""
+        return xdl_auth.extract_client_ip(peer, self.headers)
+
+    def _is_https(self) -> bool:
+        return xdl_auth.is_https_request(self.headers)
+
+    def _session_token(self) -> str | None:
+        cookies = xdl_auth.parse_cookies(self.headers.get("Cookie"))
+        return cookies.get(xdl_auth.AUTH_COOKIE_NAME)
+
+    def _current_session(self) -> dict | None:
+        if not self.app.auth_required:
+            return {"username": "local", "remember": False, "refreshed": False}
+        sess = self.app.auth.validate_session(self._session_token())
+        if sess and sess.get("refreshed"):
+            self._pending_set_cookie = xdl_auth.build_session_cookie(
+                self._session_token() or "",
+                sess["ttl"],
+                self._is_https(),
+            )
+        return sess
+
+    def _require_auth_json(self) -> dict | None:
+        sess = self._current_session()
+        if sess is None:
+            self._json({"ok": False, "authRequired": True, "error": "请先登录"}, 401)
+            return None
+        return sess
+
+    def _redirect(self, location: str, status: int = 302) -> None:
+        self.send_response(status)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def _json(self, payload, status=200, extra_headers=None):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        pending_cookie = getattr(self, "_pending_set_cookie", None)
+        if pending_cookie and not (extra_headers and any(k.lower() == "set-cookie" for k, _ in extra_headers)):
+            self.send_header("Set-Cookie", pending_cookie)
+        if extra_headers:
+            for key, val in extra_headers:
+                self.send_header(key, val)
         self.end_headers()
         self.wfile.write(data)
 
     def _body(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        if not length:
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return {}
+        if length <= 0 or length > 4 * 1024 * 1024:
             return {}
         try:
             return json.loads(self.rfile.read(length).decode("utf-8"))
@@ -1824,21 +3002,114 @@ class Handler(SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return
 
+    def _serve_media_thumb(self, query: dict) -> None:
+        key = unquote((query.get("key") or [""])[0]).strip()
+        if not key or not xdl.THUMB_KEY_RE.fullmatch(key):
+            self._json({"ok": False, "error": "无效的缩略图索引"}, 400)
+            return
+
+        target = xdl.thumb_path_for_key(key)
+        if target is None:
+            self._json({"ok": False, "error": "缩略图不存在"}, 404)
+            return
+
+        thumbs_root = xdl.get_thumbs_dir().resolve()
+        try:
+            resolved = target.resolve()
+            if not resolved.is_relative_to(thumbs_root) or not resolved.is_file():
+                self._json({"ok": False, "error": "缩略图不存在"}, 404)
+                return
+            data = resolved.read_bytes()
+        except OSError:
+            self._json({"ok": False, "error": "缩略图读取失败"}, 404)
+            return
+
+        ctype = "image/webp" if resolved.suffix.lower() == ".webp" else "image/jpeg"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "private, max-age=2592000, immutable")
+        pending_cookie = getattr(self, "_pending_set_cookie", None)
+        if pending_cookie:
+            self.send_header("Set-Cookie", pending_cookie)
+        self.end_headers()
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+
+    def do_HEAD(self):
+        parsed = urlparse(self.path)
+        route = parsed.path
+        if self.app.auth_required and route not in {"/login", "/login.html", "/styles.css", "/login.js", "/api/health"}:
+            if self._current_session() is None:
+                if route in {"/", "/index.html"}:
+                    self._redirect("/login")
+                    return
+                self.send_response(401)
+                self.send_header("Content-Length", "0")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+        if route in {"/login", "/login.html"}:
+            self.path = "/login.html"
+        super().do_HEAD()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         route = parsed.path
         query = parse_qs(parsed.query)
 
         if route == "/api/health":
+            if self.app.auth_required:
+                self._json({
+                    "ok": True,
+                    "app": "xdl-web",
+                    "version": "2.0",
+                    "authRequired": True,
+                    "configured": self.app.auth.is_configured(),
+                })
+            else:
+                self._json({
+                    "ok": True,
+                    "app": "xdl-web",
+                    "version": "2.0",
+                    "pid": os.getpid(),
+                    "url": self.app.server_url,
+                    "lanUrl": self.app.lan_url,
+                })
+            return
+
+        if route == "/api/auth/status":
+            sess = self._current_session()
             self._json({
                 "ok": True,
-                "app": "xdl-web",
-                "version": "2.0",
-                "pid": os.getpid(),
-                "url": self.app.server_url,
-                "lanUrl": self.app.lan_url,
+                "authRequired": self.app.auth_required,
+                "configured": self.app.auth.is_configured(),
+                "authenticated": sess is not None,
+                "username": sess["username"] if sess else None,
             })
             return
+
+        if route.startswith("/api/"):
+            if self._require_auth_json() is None:
+                return
+        elif self.app.auth_required:
+            if route in {"/login", "/login.html"}:
+                if self._current_session() is not None:
+                    self._redirect("/")
+                    return
+                self.path = "/login.html"
+                super().do_GET()
+                return
+            if route not in {"/styles.css", "/login.js"}:
+                if self._current_session() is None:
+                    if route.endswith((".js", ".txt", ".json")):
+                        self.send_error(401, "Authentication required")
+                    else:
+                        self._redirect("/login")
+                    return
+
         if route == "/api/state":
             self._json(self.app.snapshot())
             return
@@ -1856,9 +3127,18 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(self.app.get_logs(since=since, user=user, level=level, limit=limit))
             return
         if route == "/api/media/file":
+            self.app.touch_activity()
             self._serve_media_file(query)
             return
+        if route == "/api/media/thumb":
+            self._serve_media_thumb(query)
+            return
+        if route == "/api/media/zip":
+            self.app.touch_activity()
+            self._serve_media_zip(query)
+            return
         if route == "/api/history":
+            self.app.touch_activity()
             user = (query.get("user") or [""])[0].lstrip("@")
             try:
                 limit = int((query.get("limit") or ["20"])[0])
@@ -1878,8 +3158,10 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({"ok": False, "error": str(exc)}, 500)
             return
         if route == "/api/completed":
+            self.app.touch_activity()
             user = (query.get("user") or [""])[0].lstrip("@") or None
             kind = (query.get("kind") or ["all"])[0]
+            storage = (query.get("storage") or ["all"])[0]
             keyword = (query.get("q") or [""])[0].strip() or None
             try:
                 limit = int((query.get("limit") or ["300"])[0])
@@ -1898,6 +3180,7 @@ class Handler(SimpleHTTPRequestHandler):
                     offset=offset,
                     kind=kind if kind in {"images", "videos"} else None,
                     keyword=keyword,
+                    storage=storage if storage in {"local", "cloud"} else None,
                 )
                 totals = xdl.media_kind_counts()
                 self._json({
@@ -1912,6 +3195,9 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({"ok": False, "error": str(exc)}, 500)
             return
         if route == "/api/quit":
+            if self.app.cloud_mode:
+                self._json({"ok": False, "error": "云端服务模式下已禁用远程关停"}, 403)
+                return
             self.app.allow_window_close = True
             self._json({"ok": True})
             threading.Thread(target=self.app.stop.set, daemon=True).start()
@@ -1925,12 +3211,147 @@ class Handler(SimpleHTTPRequestHandler):
                 "running": bool(snapshot.get("running")),
             })
             return
+        if route in {"/", "/index.html"}:
+            self.app.touch_activity()
         super().do_GET()
+
+    def _serve_media_zip(self, query: dict) -> None:
+        user = unquote((query.get("user") or [""])[0]).lstrip("@")
+        if not user or not USER_RE.fullmatch(user):
+            self._json({"ok": False, "error": "无效的用户名"}, 400)
+            return
+        output_root = Path(self.app.settings["output"]).resolve()
+        files: list[Path] = []
+        seen: set[Path] = set()
+        user_dir = (output_root / user).resolve()
+        if user_dir.is_relative_to(output_root) and user_dir.is_dir():
+            for path in sorted(user_dir.rglob("*")):
+                resolved = path.resolve()
+                if resolved.is_relative_to(output_root) and resolved.is_file() and resolved.suffix.lower() not in {".part", ".tmp"}:
+                    if resolved not in seen:
+                        seen.add(resolved)
+                        files.append(resolved)
+        if output_root.is_dir():
+            for path in sorted(output_root.iterdir()):
+                if is_user_media_file(path, user, flat=True):
+                    resolved = path.resolve()
+                    if resolved.is_relative_to(output_root) and resolved not in seen:
+                        seen.add(resolved)
+                        files.append(resolved)
+
+        if not files:
+            self._json({"ok": False, "error": f"@{user} 当前没有本地媒体文件可打包（可能已转存至 Google Drive）"}, 404)
+            return
+
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(prefix=f"xdl_{user}_", suffix=".zip", delete=False) as tf:
+                tmp_path = Path(tf.name)
+            with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_STORED) as zf:
+                for fpath in files:
+                    zf.write(fpath, arcname=fpath.name)
+            size = tmp_path.stat().st_size
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(size))
+            self.send_header(
+                "Content-Disposition",
+                f"attachment; filename*=UTF-8''{quote(user + '_media.zip')}",
+            )
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            with tmp_path.open("rb") as fh:
+                while True:
+                    chunk = fh.read(65536)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+        finally:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def do_POST(self):
         route = urlparse(self.path).path
         payload = self._body()
         try:
+            if route == "/api/auth/login":
+                if not self.app.auth_required:
+                    self._json({"ok": True, "authRequired": False, "username": "local"})
+                    return
+                result = self.app.auth.verify_login(
+                    payload.get("username"),
+                    payload.get("password"),
+                    client_ip=self._client_ip(),
+                    user_agent=self.headers.get("User-Agent", ""),
+                    remember=bool(payload.get("remember")),
+                )
+                status = int(result.pop("status", 200 if result.get("ok") else 401))
+                headers = []
+                if result.get("ok"):
+                    self.app.touch_activity()
+                    token = result.pop("token")
+                    ttl = result.pop("ttl")
+                    headers.append(("Set-Cookie", xdl_auth.build_session_cookie(token, ttl, self._is_https())))
+                    self.app.add_log("info", f"管理员 {result.get('username')} 已登录 ({self._client_ip()})")
+                elif status == 429 and result.get("retryAfter"):
+                    headers.append(("Retry-After", str(int(result["retryAfter"]))))
+                self._json(result, status=status, extra_headers=headers)
+                return
+
+            if route == "/api/auth/logout":
+                self.app.auth.logout_session(self._session_token())
+                self._json(
+                    {"ok": True, "redirect": "/login"},
+                    extra_headers=[("Set-Cookie", xdl_auth.build_clear_cookie(self._is_https()))],
+                )
+                return
+
+            sess = self._require_auth_json()
+            if sess is None:
+                return
+            self.app.touch_activity()
+
+            if route == "/api/auth/change-password":
+                new_password = payload.get("newPassword")
+                new_username = payload.get("newUsername")
+                current_password = payload.get("currentPassword")
+                try:
+                    result = self.app.auth.change_credentials(
+                        current_password=current_password,
+                        new_password=new_password,
+                        new_username=new_username,
+                        client_ip=self._client_ip(),
+                        user_agent=self.headers.get("User-Agent", ""),
+                        keep_remember=bool(sess.get("remember")),
+                    )
+                except ValueError as exc:
+                    self._json({"ok": False, "error": str(exc)}, status=400)
+                    return
+                status = int(result.pop("status", 200 if result.get("ok") else 400))
+                headers = []
+                if result.get("ok"):
+                    token = result.pop("token")
+                    ttl = result.pop("ttl")
+                    headers.append(("Set-Cookie", xdl_auth.build_session_cookie(token, ttl, self._is_https())))
+                    self.app.add_log("ok", f"管理员凭据已更新（用户名：{result.get('username')}）")
+                    result["state"] = self.app.snapshot()
+                self._json(result, status=status, extra_headers=headers)
+                return
+
+            if route == "/api/auth/logout-all":
+                self.app.auth.logout_all()
+                self.app.add_log("warn", "已注销全部已登录设备的会话")
+                self._json(
+                    {"ok": True, "redirect": "/login"},
+                    extra_headers=[("Set-Cookie", xdl_auth.build_clear_cookie(self._is_https()))],
+                )
+                return
+
             if route == "/api/add":
                 result = self.app.add_users(payload.get("users") or [])
                 self._json({"ok": True, **result, "state": self.app.snapshot()})
@@ -1951,15 +3372,29 @@ class Handler(SimpleHTTPRequestHandler):
                 self.app.clear_logs()
                 self._json({"ok": True, "state": self.app.snapshot()})
             elif route == "/api/pick-folder":
+                if self.app.cloud_mode:
+                    self._json({"ok": False, "cloudMode": True, "error": "云端服务模式下使用服务器固定存储目录"})
+                    return
                 picked = pick_folder_dialog(self.app.settings.get("output", ""))
                 self._json({"ok": True, "path": picked})
             elif route == "/api/pick-file":
+                if self.app.cloud_mode:
+                    self._json({"ok": False, "cloudMode": True, "error": "云端服务模式请直接上传或粘贴 Cookie"})
+                    return
                 picked = pick_file_dialog(self.app.settings.get("cookies", ""))
                 self._json({"ok": True, "path": picked})
             elif route == "/api/upload-cookies":
                 content = payload.get("content")
-                if not isinstance(content, str) or not content.strip():
-                    self._json({"ok": False, "error": "Cookie 内容不能为空"}, 400)
+                auth_token = payload.get("authToken")
+                ct0 = payload.get("ct0")
+                if isinstance(auth_token, str) and isinstance(ct0, str) and (auth_token.strip() or ct0.strip()):
+                    try:
+                        content = _synthesize_netscape_cookies(auth_token, ct0)
+                    except ValueError as exc:
+                        self._json({"ok": False, "error": str(exc)}, 400)
+                        return
+                elif not isinstance(content, str) or not content.strip():
+                    self._json({"ok": False, "error": "请上传 cookies.txt 或填写 auth_token 与 ct0"}, 400)
                     return
                 if len(content.encode("utf-8", errors="ignore")) > 2 * 1024 * 1024:
                     self._json({"ok": False, "error": "Cookie 文件过大（上限 2 MB）"}, 400)
@@ -1967,12 +3402,93 @@ class Handler(SimpleHTTPRequestHandler):
                 xdl.XDL_HOME.mkdir(parents=True, exist_ok=True)
                 target = xdl.XDL_HOME / "cookies.txt"
                 target.write_text(content, encoding="utf-8")
+                try:
+                    os.chmod(target, 0o600)
+                except OSError:
+                    pass
                 self.app.update_settings({
                     "cookiesSource": "file",
                     "cookies": str(target),
                 })
-                self.app.add_log("ok", f"已上传并保存 Cookie 至 {target}")
+                self.app.add_log("ok", f"已保存 Cookie 至 {target}")
                 self._json({"ok": True, "path": str(target), "state": self.app.snapshot()})
+            elif route == "/api/media/delete":
+                user = str(payload.get("user") or "").strip().lstrip("@")
+                filename = str(payload.get("filename") or "").strip()
+                if not user or not USER_RE.fullmatch(user):
+                    self._json({"ok": False, "error": "无效的用户名"}, 400)
+                    return
+                output_root = Path(self.app.settings["output"]).resolve()
+                deleted_files = 0
+                if filename:
+                    if filename != Path(filename).name or ".." in filename:
+                        self._json({"ok": False, "error": "无效的文件名"}, 400)
+                        return
+                    for candidate in (output_root / user / filename, output_root / filename):
+                        try:
+                            resolved = candidate.resolve()
+                            if resolved.is_relative_to(output_root) and resolved.is_file():
+                                resolved.unlink()
+                                deleted_files += 1
+                        except OSError:
+                            pass
+                    xdl.mark_media_local_deleted(username=user, filename=filename)
+                else:
+                    user_dir = (output_root / user).resolve()
+                    if user_dir.is_relative_to(output_root) and user_dir.is_dir():
+                        for path in list(user_dir.rglob("*")):
+                            try:
+                                resolved = path.resolve()
+                                if resolved.is_relative_to(output_root) and resolved.is_file():
+                                    resolved.unlink()
+                                    deleted_files += 1
+                            except OSError:
+                                pass
+                        try:
+                            if not any(user_dir.iterdir()):
+                                user_dir.rmdir()
+                        except OSError:
+                            pass
+                    if output_root.is_dir():
+                        for path in list(output_root.iterdir()):
+                            if is_user_media_file(path, user, flat=True):
+                                try:
+                                    resolved = path.resolve()
+                                    if resolved.is_relative_to(output_root):
+                                        resolved.unlink()
+                                        deleted_files += 1
+                                except OSError:
+                                    pass
+                    xdl.mark_media_local_deleted(username=user)
+                summary = xdl.media_summary()
+                with self.app.lock:
+                    self.app.store_summary.update({
+                        "media": summary["media"],
+                        "tweets": summary["tweets"],
+                        "bytes": summary["bytes"],
+                    })
+                    self.app._refresh_item_counts_locked()
+                    self.app.add_log("info", f"已清理 @{user} 本地媒体 {deleted_files} 个文件", user=user)
+                    self.app.mark_dirty()
+                self._json({"ok": True, "deleted": deleted_files, "state": self.app.snapshot()})
+            elif route == "/api/cloud-sync/test":
+                result = self.app.test_cloud_sync()
+                status = 200 if result.get("ok") else 400
+                self._json(result, status=status)
+            elif route == "/api/cloud-sync/run":
+                user = str(payload.get("user") or "").strip().lstrip("@") or None
+                if user and not USER_RE.fullmatch(user):
+                    self._json({"ok": False, "error": "无效的用户名"}, 400)
+                    return
+                if self.app.cloud_syncing:
+                    self._json({"ok": False, "busy": True, "error": "云盘同步正在进行中，请稍候"}, 409)
+                    return
+                threading.Thread(
+                    target=self.app.sync_to_cloud,
+                    kwargs={"user": user, "trigger": "manual"},
+                    daemon=True,
+                ).start()
+                self._json({"ok": True, "started": True, "state": self.app.snapshot()})
             elif route == "/api/retry":
                 result = self.app.retry_failures(payload.get("ids") or [])
                 self._json({"ok": True, **result, "state": self.app.snapshot()})
@@ -1991,6 +3507,20 @@ class Handler(SimpleHTTPRequestHandler):
             elif route == "/api/backfill":
                 result = self.app.backfill_all()
                 self._json({"ok": True, **result, "state": self.app.snapshot()})
+            elif route == "/api/thumbs/backfill":
+                user = str(payload.get("user") or "").strip().lstrip("@") or None
+                if user and not USER_RE.fullmatch(user):
+                    self._json({"ok": False, "error": "无效的用户名"}, 400)
+                    return
+                if self.app.thumb_backfilling:
+                    self._json({"ok": False, "busy": True, "error": "缩略图补全正在进行中，请稍候"}, 409)
+                    return
+                threading.Thread(
+                    target=self.app.backfill_cloud_thumbs,
+                    kwargs={"user": user},
+                    daemon=True,
+                ).start()
+                self._json({"ok": True, "started": True, "state": self.app.snapshot()})
             elif route == "/api/settings":
                 settings = self.app.update_settings(payload)
                 self._json({"ok": True, "settings": settings, "state": self.app.snapshot()})
@@ -2001,6 +3531,9 @@ class Handler(SimpleHTTPRequestHandler):
                 self._open(payload)
                 self._json({"ok": True})
             elif route == "/api/quit":
+                if self.app.cloud_mode:
+                    self._json({"ok": False, "error": "云端服务模式下已禁用远程关停"}, 403)
+                    return
                 self.app.allow_window_close = True
                 self._json({"ok": True})
                 threading.Thread(target=self.app.stop.set, daemon=True).start()
@@ -2024,6 +3557,8 @@ class Handler(SimpleHTTPRequestHandler):
         threading.Thread(target=worker, daemon=True).start()
 
     def _open(self, payload):
+        if self.app.cloud_mode or sys.platform != "win32":
+            return
         kind = payload.get("kind")
         settings = self.app.settings
         if kind == "dir":
@@ -2051,18 +3586,91 @@ class Handler(SimpleHTTPRequestHandler):
             )
 
 
+class ActivatedThreadingHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer adopting a pre-bound systemd socket fd."""
+
+    def __init__(self, listen_fd: int, RequestHandlerClass):
+        super().__init__(("127.0.0.1", 0), RequestHandlerClass, bind_and_activate=False)
+        self.socket.close()
+        sock = socket.fromfd(listen_fd, self.address_family, self.socket_type)
+        sock.setblocking(True)
+        self.socket = sock
+        self.server_address = sock.getsockname()
+        host, port = self.server_address[:2]
+        self.server_name = socket.getfqdn(host)
+        self.server_port = port
+
+
+def _adopt_systemd_listen_fd() -> int | None:
+    if os.environ.get("LISTEN_PID", "").strip() != str(os.getpid()):
+        return None
+    try:
+        fds = int(os.environ.get("LISTEN_FDS", "0").strip() or "0")
+    except ValueError:
+        return None
+    if fds < 1:
+        return None
+    os.environ.pop("LISTEN_PID", None)
+    os.environ.pop("LISTEN_FDS", None)
+    os.environ.pop("LISTEN_FDNAMES", None)
+    return 3  # SD_LISTEN_FDS_START
+
+
 def serve(app: AppState, host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> ThreadingHTTPServer:
     handler = type("BoundHandler", (Handler,), {"app": app})
-    try:
-        server = ThreadingHTTPServer((host, port), handler)
-    except OSError:
-        if port != 0:
-            server = ThreadingHTTPServer((host, 0), handler)
-        else:
-            raise
+    listen_fd = _adopt_systemd_listen_fd()
+    if listen_fd is not None:
+        server = ActivatedThreadingHTTPServer(listen_fd, handler)
+        try:
+            os.close(listen_fd)
+        except OSError:
+            pass
+    else:
+        try:
+            server = ThreadingHTTPServer((host, port), handler)
+        except OSError:
+            if port != 0:
+                server = ThreadingHTTPServer((host, 0), handler)
+            else:
+                raise
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
+
+
+def _run_set_auth_cli(args: argparse.Namespace) -> int:
+    auth_mgr = xdl_auth.AuthManager(AUTH_FILE, AUTH_DB_FILE)
+    existing_user = auth_mgr.username() or "admin"
+    username = (args.username or "").strip()
+    if not username and args.username_file:
+        username = Path(args.username_file).read_text(encoding="utf-8").strip()
+    if not username:
+        if args.password_file or args.password_stdin:
+            username = existing_user
+        else:
+            entered = input(f"管理员用户名 [{existing_user}]: ").strip()
+            username = entered or existing_user
+
+    if args.password_file:
+        pw_path = Path(args.password_file)
+        password = pw_path.read_text(encoding="utf-8").rstrip("\r\n")
+    elif args.password_stdin:
+        password = sys.stdin.read().rstrip("\r\n")
+    else:
+        password = getpass.getpass("设置管理员密码（至少 6 位）: ")
+        confirm = getpass.getpass("再次输入密码确认: ")
+        if password != confirm:
+            print("错误: 两次输入的密码不一致", file=sys.stderr)
+            return 1
+
+    try:
+        res = auth_mgr.set_credentials(username, password, clear_sessions=True)
+    except ValueError as exc:
+        print(f"错误: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"管理员凭据已保存至 {res['path']}（用户名: {res['username']}，所有旧会话已失效）")
+    return 0
 
 
 def main() -> int:
@@ -2070,15 +3678,43 @@ def main() -> int:
     parser.add_argument("--web", action="store_true", help="以网页应用模式启动（默认）")
     parser.add_argument("--desktop", action="store_true", help="使用 PyWebView 原生窗口启动")
     parser.add_argument("--headless", action="store_true", help="仅启动服务，不自动打开浏览器")
+    parser.add_argument("--cloud", action="store_true", help="云端服务器模式（锁定本地路径、禁用远程关停、默认直连、开启登录鉴权）")
+    parser.add_argument("--require-auth", action="store_true", help="强制开启网页登录鉴权")
+    parser.add_argument("--set-auth", action="store_true", help="设置或重置管理员登录用户名与密码后退出")
+    parser.add_argument("--backfill-thumbs", action="store_true", help="为已有媒体（含云端文件）补全本地微缩略图后退出")
+    parser.add_argument("--username", default="", help="配合 --set-auth 使用：指定用户名")
+    parser.add_argument("--username-file", default="", help="配合 --set-auth 使用：从文件读取用户名")
+    parser.add_argument("--password-file", default="", help="配合 --set-auth 使用：从文件读取密码")
+    parser.add_argument("--password-stdin", action="store_true", help="配合 --set-auth 使用：从标准输入读取密码")
     parser.add_argument("--host", default="127.0.0.1", help="监听主机地址 (默认 127.0.0.1)")
     parser.add_argument("--lan", action="store_true", help="允许局域网设备（如手机）访问")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"监听端口 (默认 {DEFAULT_PORT})")
     parser.add_argument("--no-open", action="store_true", help="启动网页服务时不自动拉起浏览器")
     parser.add_argument("--state-file", default=str(STATE_FILE))
+    parser.add_argument("--idle-timeout", type=int, default=0, help="无操作变化自动退出秒数 (0 表示不自动休眠)")
     args = parser.parse_args()
+
+    if args.set_auth:
+        return _run_set_auth_cli(args)
+
+    if args.backfill_thumbs:
+        xdl.ensure_download_store()
+        cloud_mode = bool(args.cloud or CLOUD_MODE_ENV)
+        app = AppState(
+            Path(args.state_file),
+            cloud_mode=cloud_mode,
+            require_auth=False,
+            start_background=False,
+        )
+        res = app.backfill_cloud_thumbs()
+        app.save()
+        print(json.dumps(res, ensure_ascii=False))
+        return 0 if res.get("ok") else 1
 
     host = "0.0.0.0" if args.lan else args.host
     use_desktop = bool(args.desktop)
+    cloud_mode = bool(args.cloud or CLOUD_MODE_ENV)
+    require_auth = bool(args.require_auth or cloud_mode)
 
     if not args.headless and not use_desktop and args.port > 0:
         existing = detect_running_instance(args.port)
@@ -2089,7 +3725,8 @@ def main() -> int:
                 webbrowser.open(url)
             return 0
 
-    app = AppState(Path(args.state_file))
+    idle_timeout = args.idle_timeout or int(os.environ.get("XDL_IDLE_TIMEOUT", "0") or "0")
+    app = AppState(Path(args.state_file), cloud_mode=cloud_mode, require_auth=require_auth, idle_timeout=idle_timeout)
     server = serve(app, host=host, port=args.port)
     port = server.server_address[1]
     local_url = f"http://127.0.0.1:{port}/"
@@ -2103,6 +3740,10 @@ def main() -> int:
         print(f"LAN URL (手机访问): {lan_url}", flush=True)
 
     if args.headless:
+        def _handle_sig(_signum, _frame):
+            app.stop.set()
+        signal.signal(signal.SIGTERM, _handle_sig)
+        signal.signal(signal.SIGINT, _handle_sig)
         try:
             while not app.stop.wait(0.5):
                 pass
@@ -2111,6 +3752,7 @@ def main() -> int:
         finally:
             app.shutdown()
             server.shutdown()
+            server.server_close()
         return 0
 
     if not use_desktop:
