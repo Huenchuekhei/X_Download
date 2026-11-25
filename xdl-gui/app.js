@@ -50,10 +50,10 @@ const LOG_LVL_LABEL = {
   info: "信息",
 };
 
-const ICON_TWEET = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-8.5 8.5"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>';
-const ICON_LOGS = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
-const ICON_ZIP = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-const ICON_DRIVE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 12-3.5 6h-7L5 15 12 3z"/><path d="M5 15h14"/></svg>';
+const ICON_TWEET = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-8.5 8.5"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>';
+const ICON_LOGS = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
+const ICON_ZIP = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+const ICON_DRIVE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 12-3.5 6h-7L5 15 12 3z"/><path d="M5 15h14"/></svg>';
 const ICON_COPY = '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>';
 const ICON_CHECK = '<polyline points="20 6 9 17 4 12"/>';
 
@@ -481,6 +481,7 @@ async function handleQuickImport(andStart) {
   showParseStats(result, added, skipped, "快速导入");
   if (added > 0 || andStart) {
     els.pasteInput.value = "";
+    autoGrowPaste();
     if (andStart) {
       await startRun();
     } else {
@@ -488,6 +489,15 @@ async function handleQuickImport(andStart) {
     }
   } else {
     toast("账号已在队列中", "warn");
+  }
+}
+
+function autoGrowPaste() {
+  const el = els.pasteInput;
+  if (!el) return;
+  el.style.height = "";
+  if (el.value) {
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }
 }
 
@@ -517,6 +527,9 @@ function switchInputMode(mode) {
   $("mode-cmd").setAttribute("aria-selected", String(isCmd));
   $("input-accounts-box").classList.toggle("hidden", isCmd);
   $("input-cmd-box").classList.toggle("hidden", !isCmd);
+  if (window.matchMedia("(max-width: 639px)").matches && (state.mobileTab !== "queue" || state.view !== "accounts")) {
+    setView("accounts");
+  }
   if (isCmd) els.cmdInput.focus();
   else els.pasteInput.focus();
 }
@@ -614,6 +627,7 @@ function renderLogs() {
   });
   els.logTerminal.appendChild(frag);
   if (els.logAutoscroll.checked) els.logTerminal.scrollTop = els.logTerminal.scrollHeight;
+  updateMobileViewHeader();
 }
 
 /* ---------- Queue Rendering ---------- */
@@ -680,15 +694,15 @@ function rowHtml(item) {
     : `<span class="st st-${item.status}">${STATUS_LABEL[item.status] || item.status}</span>`;
   const retryBtn = item.status === "failed"
     ? `<button class="iconbtn" data-act="retry" data-id="${item.id}" type="button" title="重试" aria-label="重试 ${escapeHtml(item.user)}">
-         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 4v7h-7"/></svg>
+         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 4v7h-7"/></svg>
        </button>`
     : "";
   const initial = (item.user || "?").slice(0, 1);
   return `<div class="qrow${item.status === "active" ? " is-active" : ""}" data-id="${item.id}" draggable="true">
     <span class="qcell q-grip" title="拖拽调整顺序" aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"/></svg>
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"/></svg>
     </span>
-    <span class="qcell q-check"><input class="m-check" type="checkbox" data-act="select" data-id="${item.id}" ${checked} aria-label="选择 ${escapeHtml(item.user)}"></span>
+    <label class="qcell q-check"><input class="m-check" type="checkbox" data-act="select" data-id="${item.id}" ${checked} aria-label="选择 ${escapeHtml(item.user)}"></label>
     <button class="qcell q-user" data-act="detail" data-id="${item.id}" type="button" title="查看 @${escapeHtml(item.user)} 详情">
       <span class="avatar" aria-hidden="true">${escapeHtml(initial)}</span>
       <span class="q-who">
@@ -704,7 +718,7 @@ function rowHtml(item) {
       <button class="iconbtn" data-act="logs" data-id="${item.id}" type="button" title="查看日志" aria-label="查看 ${escapeHtml(item.user)} 日志">${ICON_LOGS}</button>
       ${retryBtn}
       <button class="iconbtn danger" data-act="remove" data-id="${item.id}" type="button" title="移除" aria-label="移除 ${escapeHtml(item.user)}">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </span>
   </div>`;
@@ -793,6 +807,9 @@ function render() {
 
   const startable = state.queue.some((item) => item.status === "waiting" || item.status === "paused");
   els.btnStart.disabled = !state.running && !startable;
+  els.btnStart.classList.toggle("primary", !state.running);
+  els.btnStart.classList.toggle("ghost", state.running);
+  els.btnStart.classList.toggle("btn-is-running", state.running);
   els.btnStartLabel.textContent = state.running ? "暂停下载" : "开始下载";
   $("btn-start-icon").innerHTML = state.running
     ? '<path d="M9 5v14M15 5v14"/>'
@@ -915,7 +932,7 @@ function failureRowHtml(failure) {
   const exhausted = isExhausted(failure);
   const retryDisabled = exhausted || failure.status === "queued" ? "disabled" : "";
   return `<div class="frow" data-fid="${failure.id}">
-    <span class="fcell f-check"><input class="m-check" type="checkbox" data-fact="select" data-fid="${failure.id}" ${checked} aria-label="选择 ${escapeHtml(failure.name)}"></span>
+    <label class="fcell f-check"><input class="m-check" type="checkbox" data-fact="select" data-fid="${failure.id}" ${checked} aria-label="选择 ${escapeHtml(failure.name)}"></label>
     <button class="fcell f-file" data-fact="detail" data-fid="${failure.id}" type="button">
       <span class="f-name">${escapeHtml(failure.name)}</span>
       <span class="f-owner">@${escapeHtml(failure.user)} · ${escapeHtml(failure.size)}</span>
@@ -924,11 +941,11 @@ function failureRowHtml(failure) {
     <span class="fcell f-tries${exhausted ? " at-limit" : ""}">${failure.tries}/${state.settings.maxRetries}</span>
     <span class="fcell f-state">${failureStateHtml(failure)}</span>
     <span class="fcell f-ops">
-      <button class="iconbtn" data-fact="retry" data-fid="${failure.id}" type="button" ${retryDisabled} title="重试">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 4v7h-7"/></svg>
+      <button class="iconbtn" data-fact="retry" data-fid="${failure.id}" type="button" ${retryDisabled} title="重试" aria-label="重试 ${escapeHtml(failure.name)}">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 4v7h-7"/></svg>
       </button>
-      <button class="iconbtn danger" data-fact="discard" data-fid="${failure.id}" type="button" title="放弃">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      <button class="iconbtn danger" data-fact="discard" data-fid="${failure.id}" type="button" title="放弃" aria-label="放弃 ${escapeHtml(failure.name)}">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </span>
   </div>`;
@@ -952,6 +969,11 @@ function renderFailed() {
   $("f-network").textContent = byReason.network;
   $("f-forbidden").textContent = byReason.forbidden;
   $("f-exhausted").textContent = byReason.exhausted;
+
+  [["file", "fsort-file-arrow"], ["reason", "fsort-reason-arrow"], ["tries", "fsort-tries-arrow"]].forEach(([key, id]) => {
+    const el = $(id);
+    if (el) el.textContent = state.failedSortKey === key ? (state.failedSortDir === 1 ? "▲" : "▼") : "";
+  });
 
   const retryable = retryableFailures();
   els.btnFailedRetry.disabled = retryable.length === 0;
@@ -1122,7 +1144,7 @@ function completedCardHtml(row) {
     }
     primaryAction = `<a class="linkbtn" href="${escapeHtml(cloudUrl)}" target="_blank" rel="noopener noreferrer">Drive 播放 ↗</a>`;
   } else {
-    thumbHtml = `<div class="mcard-thumb"><div class="mcard-cloud-stage"><span class="mcard-cloud-cta" style="color:var(--p-muted)">本地文件已清理</span></div></div>`;
+    thumbHtml = `<div class="mcard-thumb"><div class="mcard-cloud-stage"><span class="mcard-cloud-cta is-muted">本地文件已清理</span></div></div>`;
     primaryAction = tweetId
       ? `<button class="linkbtn" data-dact="tweet" type="button">原推文</button>`
       : "";
@@ -1139,9 +1161,9 @@ function completedCardHtml(row) {
       </div>
       <div class="mcard-foot">
         ${primaryAction}
-        <div style="display:flex;gap:4px">
+        <div class="mcard-foot-icons">
           ${tweetId ? `<button class="iconbtn" data-dact="tweet" type="button" title="打开原推文" aria-label="打开原推文">${ICON_TWEET}</button>` : ""}
-          ${localOk ? `<button class="iconbtn danger" data-dact="delete-file" type="button" title="清理本地文件" aria-label="删除本地文件 ${escapeHtml(filename)}"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ""}
+          ${localOk ? `<button class="iconbtn danger" data-dact="delete-file" type="button" title="清理本地文件" aria-label="删除本地文件 ${escapeHtml(filename)}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ""}
         </div>
       </div>
     </div>
@@ -1169,10 +1191,10 @@ function completedRowHtml(row) {
     opsHtml += `<a class="btn primary btn-sm" href="${escapeHtml(cloudUrl)}" target="_blank" rel="noopener noreferrer">Drive 打开 ↗</a>`;
   }
   if (tweetId) {
-    opsHtml += `<button class="iconbtn" data-dact="tweet" type="button" title="打开原推文">${ICON_TWEET}</button>`;
+    opsHtml += `<button class="iconbtn" data-dact="tweet" type="button" title="打开原推文" aria-label="打开原推文">${ICON_TWEET}</button>`;
   }
   if (localOk) {
-    opsHtml += `<button class="iconbtn danger" data-dact="delete-file" type="button" title="清理本地"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
+    opsHtml += `<button class="iconbtn danger" data-dact="delete-file" type="button" title="清理本地" aria-label="删除本地文件 ${escapeHtml(filename)}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
   }
 
   return `<div class="crow" data-user="${escapeHtml(user)}" data-file="${escapeHtml(filename)}" data-tweet="${escapeHtml(tweetId)}" data-size="${Number(row.size) || 0}" data-cloud-url="${escapeHtml(cloudUrl)}" data-local="${localOk ? "1" : "0"}">
@@ -1244,6 +1266,7 @@ function renderCompleted() {
     moreRow.classList.toggle("hidden", !more);
     if (more) $("done-more-note").textContent = `已显示 ${rows.length} 条记录`;
   }
+  updateMobileViewHeader();
 }
 
 /* ---------- Media Lightbox Preview Modal ---------- */
@@ -1316,8 +1339,33 @@ function closeMediaModal() {
 
 /* ---------- View & Mobile Navigation ---------- */
 
+const mqTablet = window.matchMedia("(min-width: 640px) and (max-width: 1023px)");
+
+function syncSideDrawerInert() {
+  const side = $("workspace-side");
+  if (!side) return;
+  side.inert = mqTablet.matches && !document.body.classList.contains("side-open");
+}
+
+function updateMobileViewHeader() {
+  const titleEl = $("mob-view-title");
+  const metaEl = $("mob-view-meta");
+  if (!titleEl || !metaEl) return;
+  if (state.view === "done") {
+    titleEl.textContent = "媒体库";
+    metaEl.textContent = `${state.doneTotals.all || 0} 个媒体`;
+  } else if (state.view === "logs") {
+    titleEl.textContent = "实时日志";
+    metaEl.textContent = `${visibleLogs().length} 条日志`;
+  } else {
+    titleEl.textContent = "";
+    metaEl.textContent = "";
+  }
+}
+
 function setView(view) {
   state.view = view;
+  document.body.dataset.view = view;
   const map = { accounts: "view-accounts", logs: "view-logs", failed: "view-failed", done: "view-done" };
   Object.entries(map).forEach(([key, id]) => {
     const on = key === view;
@@ -1341,6 +1389,7 @@ function setView(view) {
     else if (view === "done") syncMobileNav("done", false);
     else syncMobileNav("queue", false);
   }
+  updateMobileViewHeader();
   render();
 }
 
@@ -1353,7 +1402,7 @@ function syncMobileNav(tab, alsoSwitchView = true) {
     btn.setAttribute("aria-pressed", String(on));
   });
   if (alsoSwitchView) {
-    if (tab === "queue" && (state.view === "logs" || state.view === "done")) setView("accounts");
+    if (tab === "queue" && state.view !== "accounts") setView("accounts");
     else if (tab === "logs" && state.view !== "logs") setView("logs");
     else if (tab === "done" && state.view !== "done") setView("done");
   }
@@ -1366,10 +1415,12 @@ function syncMobileNav(tab, alsoSwitchView = true) {
 function openSideDrawer(scrollToSelector) {
   if (window.matchMedia("(max-width: 639px)").matches) {
     syncMobileNav("settings", false);
-  } else if (window.matchMedia("(max-width: 1023px)").matches) {
+  } else if (mqTablet.matches) {
     document.body.classList.add("side-open");
     $("side-backdrop").classList.remove("hidden");
     $("btn-open-side").setAttribute("aria-expanded", "true");
+    syncSideDrawerInert();
+    if (!scrollToSelector) $("btn-close-side")?.focus();
   }
   if (scrollToSelector) {
     const target = document.querySelector(scrollToSelector);
@@ -1378,9 +1429,12 @@ function openSideDrawer(scrollToSelector) {
 }
 
 function closeSideDrawer() {
+  const wasOpen = document.body.classList.contains("side-open");
   document.body.classList.remove("side-open");
   $("side-backdrop").classList.add("hidden");
   $("btn-open-side").setAttribute("aria-expanded", "false");
+  syncSideDrawerInert();
+  if (wasOpen && mqTablet.matches) $("btn-open-side")?.focus();
 }
 
 function updateMobileBadges() {
@@ -1441,11 +1495,20 @@ function syncDurationUI() {
 
   const ruleBox = els.filterRuleSummary;
   ruleBox.classList.toggle("is-active", hasAny);
-  if (isImagesOnly) ruleBox.textContent = "仅下载图片，视频将跳过且不写入已下载档案。";
-  else if (mediaType === "videos" && enabled) ruleBox.textContent = `仅下载 ≤ ${formatDuration(totalSec)} 的视频，超时视频不写入档案。`;
-  else if (mediaType === "videos") ruleBox.textContent = "仅下载视频，不限制单条视频时长。";
-  else if (enabled) ruleBox.textContent = `下载全部图片 + 时长 ≤ ${formatDuration(totalSec)} 的视频。`;
-  else ruleBox.textContent = "未启用过滤：抓取账号全部图片与全部时长视频。";
+  if (isImagesOnly) ruleBox.textContent = "仅下载图片，视频将跳过且不写入已下载档案";
+  else if (mediaType === "videos" && enabled) ruleBox.textContent = `仅下载 ≤ ${formatDuration(totalSec)} 的视频，超时视频不写入档案`;
+  else if (mediaType === "videos") ruleBox.textContent = "仅下载视频，不限制单条视频时长";
+  else if (enabled) ruleBox.textContent = `下载全部图片 + 时长 ≤ ${formatDuration(totalSec)} 的视频`;
+  else ruleBox.textContent = "未启用过滤：抓取账号全部图片与全部时长视频";
+
+  document.querySelectorAll(".cmd-chip[data-quick-preset]").forEach((btn) => {
+    const p = btn.dataset.quickPreset;
+    const isOn = (p === "short-video" && mediaType === "videos" && enabled && totalSec === 60)
+      || (p === "videos" && mediaType === "videos" && !enabled)
+      || (p === "images" && mediaType === "images");
+    btn.classList.toggle("active", isOn);
+    btn.setAttribute("aria-pressed", String(isOn));
+  });
 }
 
 function syncSettingsInputs() {
@@ -1618,11 +1681,11 @@ function renderEnvChips() {
   } else if (cs.targetConfigured) {
     const baseText = state.settings.cloudSyncEnabled
       ? `每次下载完成后自动同步至 ${state.settings.cloudSyncTarget}`
-      : "Google Drive 已连接，打开上方开关即可自动同步并释放空间。";
+      : "Google Drive 已连接，打开上方开关即可自动同步并释放空间";
     els.cloudSyncSummary.textContent = `${baseText}${verifiedTail}`;
     els.cloudSyncSummary.classList.toggle("is-active", Boolean(state.settings.cloudSyncEnabled));
   } else {
-    els.cloudSyncSummary.textContent = "完成服务器 rclone 授权后即可开启“自动同步到云盘”。";
+    els.cloudSyncSummary.textContent = "完成服务器 rclone 授权后即可开启“自动同步到云盘”";
     els.cloudSyncSummary.classList.remove("is-active");
   }
 
@@ -1687,7 +1750,7 @@ function mediaRowHtml(file) {
       <span class="fsize">${formatBytes(file.size)}</span>
     </a></li>`;
   }
-  return `<li><button class="media-row" type="button" data-drawer-act="preview-media" data-file="${escapeHtml(name)}" data-tweet="${escapeHtml(tweet)}" data-size="${Number(file.size) || 0}" data-cloud-url="${escapeHtml(cloudUrl)}" style="width:100%;text-align:left">
+  return `<li><button class="media-row" type="button" data-drawer-act="preview-media" data-file="${escapeHtml(name)}" data-tweet="${escapeHtml(tweet)}" data-size="${Number(file.size) || 0}" data-cloud-url="${escapeHtml(cloudUrl)}">
     <span class="media-main"><span class="media-name">${escapeHtml(name)}</span><span class="media-meta">${escapeHtml(meta)}</span></span>
     <span class="fsize">${formatBytes(file.size)}</span>
   </button></li>`;
@@ -1945,8 +2008,8 @@ function bindEvents() {
     performLogout("/api/auth/logout-all");
   });
 
-  const EYE_OPEN_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-  const EYE_OFF_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.77 21.77 0 0 1 5.06-6.94"/><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.78 21.78 0 0 1-3.17 4.73"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  const EYE_OPEN_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const EYE_OFF_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.77 21.77 0 0 1 5.06-6.94"/><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.78 21.78 0 0 1-3.17 4.73"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
   document.querySelectorAll(".pw-toggle[data-pw-target]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const target = $(btn.dataset.pwTarget);
@@ -2017,6 +2080,7 @@ function bindEvents() {
     els.fileInput.value = "";
   });
 
+  els.pasteInput.addEventListener("input", autoGrowPaste);
   els.pasteInput.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();
@@ -2234,6 +2298,16 @@ function bindEvents() {
     });
   });
 
+  [["fsort-file", "file"], ["fsort-reason", "reason"], ["fsort-tries", "tries"]].forEach(([id, key]) => {
+    $(id)?.addEventListener("click", () => {
+      if (state.failedSortKey === key) {
+        if (state.failedSortDir === 1) state.failedSortDir = -1;
+        else { state.failedSortKey = null; state.failedSortDir = 1; }
+      } else { state.failedSortKey = key; state.failedSortDir = 1; }
+      renderFailed();
+    });
+  });
+
   els.failedSelectAll.addEventListener("change", () => {
     const items = visibleFailures();
     if (els.failedSelectAll.checked) items.forEach((f) => state.failedSelected.add(f.id));
@@ -2290,12 +2364,16 @@ function bindEvents() {
     state.doneViewMode = "grid";
     $("done-mode-grid").classList.add("active");
     $("done-mode-list").classList.remove("active");
+    $("done-mode-grid").setAttribute("aria-pressed", "true");
+    $("done-mode-list").setAttribute("aria-pressed", "false");
     renderCompleted();
   });
   $("done-mode-list").addEventListener("click", () => {
     state.doneViewMode = "list";
     $("done-mode-list").classList.add("active");
     $("done-mode-grid").classList.remove("active");
+    $("done-mode-list").setAttribute("aria-pressed", "true");
+    $("done-mode-grid").setAttribute("aria-pressed", "false");
     renderCompleted();
   });
 
@@ -2402,12 +2480,16 @@ function bindEvents() {
   $("ck-tab-token").addEventListener("click", () => {
     $("ck-tab-token").classList.add("active");
     $("ck-tab-file").classList.remove("active");
+    $("ck-tab-token").setAttribute("aria-selected", "true");
+    $("ck-tab-file").setAttribute("aria-selected", "false");
     $("ck-pane-token").classList.remove("hidden");
     $("ck-pane-file").classList.add("hidden");
   });
   $("ck-tab-file").addEventListener("click", () => {
     $("ck-tab-file").classList.add("active");
     $("ck-tab-token").classList.remove("active");
+    $("ck-tab-file").setAttribute("aria-selected", "true");
+    $("ck-tab-token").setAttribute("aria-selected", "false");
     $("ck-pane-file").classList.remove("hidden");
     $("ck-pane-token").classList.add("hidden");
   });
@@ -2636,6 +2718,14 @@ function bindEvents() {
     }
   });
 
+  mqTablet.addEventListener("change", () => {
+    if (!mqTablet.matches && document.body.classList.contains("side-open")) {
+      closeSideDrawer();
+    } else {
+      syncSideDrawerInert();
+    }
+  });
+
   bindDragReorder();
 }
 
@@ -2643,6 +2733,7 @@ function getTopOverlay() {
   if (!els.mediaModal.classList.contains("hidden")) return els.mediaModal.querySelector(".modal");
   if (!els.closeModal.classList.contains("hidden")) return els.closeModal.querySelector(".modal");
   if (!els.drawer.classList.contains("hidden")) return els.drawer;
+  if (document.body.classList.contains("side-open")) return $("workspace-side");
   return null;
 }
 
@@ -2672,6 +2763,7 @@ function restoreFocus(element) {
 async function init() {
   bindEvents();
   syncSettingsInputs();
+  syncSideDrawerInert();
   try {
     const data = await api("/api/state");
     applyServerState(data);

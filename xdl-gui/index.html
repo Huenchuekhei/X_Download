@@ -11,10 +11,10 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2318191b'/%3E%3Cpath d='M8 8l16 16M24 8L8 24' stroke='%23ff4a1f' stroke-width='3.5' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
-<body data-mobile-tab="queue">
+<body data-mobile-tab="queue" data-view="accounts">
 <div class="app" id="app">
 
   <!-- Top Bar (56px) -->
@@ -36,51 +36,49 @@
         </button>
       </div>
 
-      <div class="tb-right">
-        <div class="envchips" aria-label="运行环境状态">
-          <button class="envchip" id="env-cookies" type="button" title="点击前往配置 X Cookie">
-            <i class="dot" aria-hidden="true"></i>
-            <span id="env-cookies-text">Cookie 检测中…</span>
-          </button>
-          <span class="envchip" id="env-proxy">
-            <i class="dot" aria-hidden="true"></i>
-            <span id="env-proxy-text">网络检测中…</span>
-          </span>
-          <button class="envchip" id="env-cloud" type="button" title="点击配置 Google Drive 自动同步">
-            <i class="dot" aria-hidden="true"></i>
-            <span id="env-cloud-text">云盘未授权</span>
-          </button>
-          <span class="envchip hide-sm" id="env-storage" title="服务器可用存储空间">
-            <span class="mono" id="env-storage-text">存储 —</span>
-          </span>
-          <button class="envchip envchip-accent hidden" id="env-filter" type="button" title="点击调整媒体与时长过滤">
-            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-            <span id="env-filter-text"></span>
-          </button>
-        </div>
+      <div class="envchips" aria-label="运行环境状态">
+        <button class="envchip" id="env-cookies" type="button" title="点击前往配置 X Cookie">
+          <i class="dot" aria-hidden="true"></i>
+          <span id="env-cookies-text">Cookie 检测中…</span>
+        </button>
+        <span class="envchip hide-sm" id="env-proxy">
+          <i class="dot" aria-hidden="true"></i>
+          <span id="env-proxy-text">网络检测中…</span>
+        </span>
+        <button class="envchip" id="env-cloud" type="button" title="点击配置 Google Drive 自动同步">
+          <i class="dot" aria-hidden="true"></i>
+          <span id="env-cloud-text">云盘未授权</span>
+        </button>
+        <span class="envchip hide-sm" id="env-storage" title="服务器可用存储空间">
+          <span class="mono" id="env-storage-text">存储 —</span>
+        </span>
+        <button class="envchip envchip-accent hidden" id="env-filter" type="button" title="点击调整媒体与时长过滤">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          <span id="env-filter-text"></span>
+        </button>
+      </div>
 
-        <div class="tb-actions">
-          <span class="envchip hide-sm auth-only" id="auth-user-chip" title="当前已登录管理员">
-            <i class="dot dot-ok" aria-hidden="true"></i>
-            <span class="mono" id="auth-username-text">admin</span>
-          </span>
-          <button class="btn ghost btn-sm auth-only" id="btn-logout" type="button" title="退出当前登录">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            <span>退出</span>
-          </button>
-          <button class="btn ghost btn-sm tablet-only" id="btn-open-side" type="button" aria-expanded="false" aria-controls="workspace-side">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
-            <span>设置与同步</span>
-          </button>
-          <button class="btn ghost btn-sm desktop-only-action" id="btn-open-root" type="button" title="打开本地下载目录">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-            <span>打开目录</span>
-          </button>
-          <button class="btn danger-ghost btn-sm desktop-only-action" id="btn-stop-service" type="button" title="停止本地网页服务">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M12 3v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
-            <span>停止服务</span>
-          </button>
-        </div>
+      <div class="tb-actions">
+        <span class="envchip hide-sm auth-only" id="auth-user-chip" title="当前已登录管理员">
+          <i class="dot dot-ok" aria-hidden="true"></i>
+          <span class="mono" id="auth-username-text">admin</span>
+        </span>
+        <button class="btn ghost btn-sm auth-only" id="btn-logout" type="button" title="退出当前登录" aria-label="退出登录">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          <span>退出</span>
+        </button>
+        <button class="btn ghost btn-sm tablet-only" id="btn-open-side" type="button" aria-expanded="false" aria-controls="workspace-side">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+          <span>设置与同步</span>
+        </button>
+        <button class="btn ghost btn-sm desktop-only-action" id="btn-open-root" type="button" title="打开本地下载目录">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          <span>打开目录</span>
+        </button>
+        <button class="btn danger-ghost btn-sm desktop-only-action" id="btn-stop-service" type="button" title="停止本地网页服务">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M12 3v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
+          <span>停止服务</span>
+        </button>
       </div>
     </div>
   </header>
@@ -98,24 +96,24 @@
           <div id="input-accounts-box" class="input-mode-box">
             <label for="paste-input" class="sr-only">输入 X 博主用户名或主页链接</label>
             <textarea id="paste-input" rows="1" spellcheck="false"
-              placeholder="粘贴 @用户名 或 x.com 链接（支持空格、逗号或换行批量导入，如 elonmusk, https://x.com/NASA）"></textarea>
+              placeholder="粘贴 @用户名 或 x.com 链接（支持批量）"></textarea>
             <div class="quick-actions-row">
               <button class="btn ghost btn-sm" id="btn-import-txt" type="button" title="导入 .txt 名单文件">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
                 <span>导入 .txt</span>
               </button>
               <button class="btn ghost btn-sm" id="btn-add-only" type="button">仅入队</button>
-              <button class="btn primary btn-sm" id="btn-add-start" type="submit">加入并下载</button>
+              <button class="btn accent btn-sm" id="btn-add-start" type="submit">加入并下载</button>
             </div>
           </div>
 
           <div id="input-cmd-box" class="input-mode-box hidden">
             <label class="cmd-prompt mono" for="cmd-input">xdl&gt;</label>
             <input id="cmd-input" type="text" spellcheck="false"
-              placeholder="输入 xdl 命令，例如：NASA --videos-only --max-duration 60  或  --retry"
+              placeholder="NASA --videos-only --max-duration 60 或 --retry"
               aria-label="输入 xdl 命令（Ctrl+K 聚焦，上下方向键切换历史）">
             <span class="cmd-kbd mono" aria-hidden="true">Ctrl+K</span>
-            <button class="btn primary btn-sm" id="btn-cmd-run" type="submit">执行</button>
+            <button class="btn accent btn-sm" id="btn-cmd-run" type="submit">执行</button>
           </div>
         </form>
       </div>
@@ -142,6 +140,10 @@
       <section class="panel workspace-panel" aria-labelledby="workspace-tabs-title">
         <div class="panel-head workspace-head">
           <h1 id="workspace-tabs-title" class="sr-only">XDL 任务与媒体工作区</h1>
+          <div class="mob-view-head">
+            <h2 class="mob-view-title" id="mob-view-title">媒体库</h2>
+            <span class="mob-view-meta mono" id="mob-view-meta"></span>
+          </div>
           <div class="viewtabs" role="tablist" aria-label="工作区视图">
             <button class="viewtab active" id="view-accounts" role="tab" aria-selected="true" aria-controls="accounts-view" tabindex="0" type="button">
               <span>下载队列</span>
@@ -187,7 +189,7 @@
             </button>
             <button class="btn ghost btn-sm" id="btn-round-review" type="button">查看失败</button>
             <button class="iconbtn" id="btn-round-dismiss" type="button" aria-label="收起总结">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
             </button>
           </div>
         </div>
@@ -202,12 +204,12 @@
               <button class="chip" data-filter="done" aria-pressed="false" type="button">完成 <b id="c-done">0</b></button>
               <button class="chip" data-filter="failed" aria-pressed="false" type="button">失败 <b id="c-failed">0</b></button>
             </div>
-            <input class="search" id="queue-search" type="search" placeholder="搜索博主…" aria-label="搜索队列博主">
+            <input class="search" id="queue-search" type="search" placeholder="搜索博主" aria-label="搜索队列博主">
           </div>
 
-          <div class="actions-bar">
+          <div class="actions-bar queue-actions-bar">
             <button class="btn primary btn-sm" id="btn-start" type="button">
-              <svg id="btn-start-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5.5l11 6.5-11 6.5z"/></svg>
+              <svg id="btn-start-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5.5l11 6.5-11 6.5z"/></svg>
               <span id="btn-start-label">开始下载</span>
             </button>
             <button class="btn ghost btn-sm" id="btn-stop-run" type="button" disabled>停止任务</button>
@@ -250,7 +252,7 @@
           </div>
 
           <div class="actions-bar done-actions-bar">
-            <input class="search search-grow" id="done-search" type="search" placeholder="搜索文件名或 @博主…" aria-label="搜索媒体库">
+            <input class="search search-grow" id="done-search" type="search" placeholder="搜索文件名或 @博主" aria-label="搜索媒体库">
             <div class="seg seg-compact" role="group" aria-label="媒体视图模式">
               <button class="seg-btn active" id="done-mode-grid" type="button" aria-pressed="true">画廊</button>
               <button class="seg-btn" id="done-mode-list" type="button" aria-pressed="false">列表</button>
@@ -288,11 +290,11 @@
               <select class="select-sm" id="log-user-filter" aria-label="按博主筛选日志">
                 <option value="">全部账号</option>
               </select>
-              <input class="search" id="log-search" type="search" placeholder="过滤关键字…" aria-label="过滤日志">
+              <input class="search" id="log-search" type="search" placeholder="过滤关键字" aria-label="过滤日志">
             </div>
           </div>
 
-          <div class="actions-bar">
+          <div class="actions-bar logs-actions-bar">
             <label class="check-inline" for="log-autoscroll">
               <input class="m-check" type="checkbox" id="log-autoscroll" checked>
               <span>自动滚动</span>
@@ -315,8 +317,8 @@
         <!-- Tab 4: Failed Queue -->
         <div id="failed-view" class="tab-view hidden" role="tabpanel" aria-labelledby="view-failed">
           <div class="explain">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5"/><path d="M12 8h.01"/></svg>
-            <span>失败项按推文与媒体粒度精确记录，重试时不会重复抓取已成功的媒体。</span>
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5"/><path d="M12 8h.01"/></svg>
+            <span>失败项按推文与媒体粒度精确记录，重试时不会重复抓取已成功的媒体</span>
           </div>
 
           <div class="toolbar">
@@ -327,10 +329,10 @@
               <button class="chip" data-reason="forbidden" aria-pressed="false" type="button">权限 <b id="f-forbidden">0</b></button>
               <button class="chip" data-reason="exhausted" aria-pressed="false" type="button">不可重试 <b id="f-exhausted">0</b></button>
             </div>
-            <input class="search" id="failed-search" type="search" placeholder="搜索失败文件…" aria-label="搜索失败文件">
+            <input class="search" id="failed-search" type="search" placeholder="搜索失败文件" aria-label="搜索失败文件">
           </div>
 
-          <div class="actions-bar">
+          <div class="actions-bar failed-actions-bar">
             <button class="btn primary btn-sm" id="btn-failed-retry" type="button">
               <span id="btn-failed-retry-label">重试全部失败</span>
             </button>
@@ -360,17 +362,18 @@
       <!-- Right 4 Columns: Filters, Cloud Sync (方案 A), Cookies & Parameters -->
       <div class="side-backdrop hidden" id="side-backdrop"></div>
       <aside class="workspace-side" id="workspace-side" aria-label="筛选、云盘同步与系统参数">
+        <h2 class="mobile-settings-title">设置与同步</h2>
         <div class="side-drawer-head tablet-only">
           <strong>筛选、云盘同步与配置</strong>
           <button class="iconbtn" id="btn-close-side" type="button" aria-label="关闭设置面板">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
         </div>
 
         <!-- Card 1: Cloud Drive Auto-Sync (Google Drive · 方案 A) -->
         <section class="panel cloud-panel" id="cloud-panel" aria-labelledby="cloud-title">
           <div class="panel-head">
-            <h2 id="cloud-title">自动同步到云盘</h2>
+            <h2 id="cloud-title">Google Drive 同步</h2>
             <span class="tag" id="cloud-status-tag">未授权</span>
           </div>
           <div class="panel-body">
@@ -403,7 +406,7 @@
               </div>
             </div>
 
-            <div class="rule-summary" id="cloud-sync-summary" aria-live="polite">尚未配置 Google Drive 同步。</div>
+            <div class="rule-summary" id="cloud-sync-summary" aria-live="polite">尚未配置 Google Drive 同步</div>
 
             <div class="btnrow">
               <button class="btn ghost btn-sm" id="btn-cloud-test" type="button">测试连接</button>
@@ -435,7 +438,7 @@
                 <input id="ck-ct0" type="password" autocomplete="off" spellcheck="false" placeholder="从 x.com Cookie 复制 ct0">
               </div>
               <button class="btn primary btn-sm wide" id="btn-save-tokens" type="button">保存 Token 到服务器</button>
-              <p class="fieldnote">手机或电脑登录 x.com 后，在浏览器 Cookie 中复制两项即可，立即生效。</p>
+              <p class="fieldnote">手机或电脑登录 x.com 后，在浏览器 Cookie 中复制两项即可，立即生效</p>
             </div>
 
             <div id="ck-pane-file" class="ck-pane hidden">
@@ -457,7 +460,7 @@
                   <option value="safari">Safari</option>
                 </select>
               </div>
-              <p class="fieldnote">支持浏览器扩展导出的 Netscape 格式 cookies.txt。</p>
+              <p class="fieldnote">支持浏览器扩展导出的 Netscape 格式 cookies.txt</p>
             </div>
           </div>
         </section>
@@ -637,7 +640,7 @@
               <code class="mono" id="cmd-preview-text"></code>
               <div class="btnrow">
                 <button class="btn ghost btn-sm" id="btn-copy-cmd" type="button">
-                  <svg id="copy-cmd-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <svg id="copy-cmd-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                   <span id="copy-cmd-label">复制命令</span>
                 </button>
                 <button class="btn ghost btn-sm" id="btn-fill-cmd" type="button">填入命令栏</button>
@@ -666,7 +669,7 @@
                 <div class="pw-wrap">
                   <input id="auth-current-pw" type="password" autocomplete="current-password" placeholder="验证当前密码">
                   <button class="pw-toggle" type="button" data-pw-target="auth-current-pw" aria-label="显示密码" aria-pressed="false">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                   </button>
                 </div>
               </div>
@@ -681,7 +684,7 @@
                 <div class="pw-wrap">
                   <input id="auth-new-pw" type="password" autocomplete="new-password" placeholder="输入新密码">
                   <button class="pw-toggle" type="button" data-pw-target="auth-new-pw" aria-label="显示密码" aria-pressed="false">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                   </button>
                 </div>
               </div>
@@ -698,7 +701,7 @@
               <button class="btn ghost btn-sm" id="btn-panel-logout" type="button">退出当前设备</button>
               <button class="btn danger-ghost btn-sm" id="btn-logout-all" type="button">注销全部设备</button>
             </div>
-            <p class="fieldnote">修改密码后会立刻使其他设备历史会话失效；若忘记密码，可在服务器运行 setup_auth.sh 重置。</p>
+            <p class="fieldnote">修改密码后会立刻使其他设备历史会话失效；若忘记密码，可在服务器运行 setup_auth.sh 重置</p>
           </div>
         </section>
       </aside>
@@ -717,22 +720,22 @@
 <!-- Mobile Safe-Area Bottom Action Bar -->
 <nav class="mob-nav" aria-label="移动端主导航">
   <button class="mob-btn active" type="button" data-mobile-tab="queue" aria-pressed="true">
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
     <span>队列</span>
     <span class="mob-badge mono hidden" id="mob-queue-badge">0</span>
   </button>
   <button class="mob-btn" type="button" data-mobile-tab="done" aria-pressed="false">
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
     <span>媒体库</span>
     <span class="mob-badge mono hidden" id="mob-done-badge">0</span>
   </button>
   <button class="mob-btn" type="button" data-mobile-tab="logs" aria-pressed="false">
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
     <span>日志</span>
     <span class="mob-dot hidden" id="mob-log-dot"></span>
   </button>
   <button class="mob-btn" type="button" data-mobile-tab="settings" aria-pressed="false">
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.86 1 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.86 1 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     <span>设置</span>
     <span class="mob-dot hidden" id="mob-filter-dot"></span>
   </button>
@@ -766,13 +769,13 @@
       </div>
       <div class="media-nav-group">
         <button class="iconbtn" id="media-modal-prev" type="button" aria-label="上一个媒体" title="上一个 (←)">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
         <button class="iconbtn" id="media-modal-next" type="button" aria-label="下一个媒体" title="下一个 (→)">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </button>
         <button class="iconbtn" id="media-modal-close" type="button" aria-label="关闭媒体预览">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
         </button>
       </div>
     </div>
@@ -795,7 +798,7 @@
   <div class="drawer-head">
     <h3 id="drawer-title">@user</h3>
     <button class="iconbtn" id="drawer-close" type="button" aria-label="关闭详情">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
   </div>
   <div class="drawer-body" id="drawer-body"></div>
