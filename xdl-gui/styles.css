@@ -670,7 +670,7 @@ button.envchip:hover { border-color: var(--line-strong); background: var(--p-rai
   flex-wrap: wrap;
 }
 
-.mob-view-head { display: none; }
+.mob-view-head, .mobile-settings-title { display: none; }
 
 .viewtabs {
   display: flex;
@@ -2009,11 +2009,93 @@ body[data-view="logs"] .roundbar {
   }
 }
 
-@media (max-width: 899px) and (min-width: 640px) {
-  .qhead, .qrow {
-    grid-template-columns: 28px minmax(140px, 1.5fr) 76px minmax(96px, 0.9fr) minmax(96px, 0.9fr) 144px;
+@media (max-width: 1023px) {
+  /* 44x44 checkbox hit target with a 20x20 visual box on touch layouts. */
+  .m-check {
+    width: 44px;
+    height: 44px;
+    border: 0;
+    background: transparent;
+    position: relative;
   }
-  .q-grip { display: none; }
+  .m-check::after {
+    content: "";
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    border: 1px solid var(--line-strong);
+    background: var(--p-bg);
+    transition: background-color var(--m-in) var(--m-ease), border-color var(--m-in) var(--m-ease);
+  }
+  .m-check:checked { background: transparent; border-color: transparent; }
+  .m-check:checked::after { background: var(--p-accent); border-color: var(--p-accent); }
+  .m-check::before {
+    position: relative;
+    z-index: 1;
+    width: 10px;
+    height: 6px;
+  }
+  .q-check, .f-check { width: 44px; height: 44px; }
+}
+
+@media (min-width: 1024px) and (max-width: 1199px) {
+  .qhead, .qrow {
+    grid-template-columns: 28px minmax(0, 1.5fr) 72px minmax(88px, 0.8fr) 152px;
+  }
+  .q-grip, .q-files { display: none; }
+}
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  .qhead, .qrow {
+    grid-template-columns: 44px minmax(0, 1.5fr) 72px minmax(88px, 0.8fr) 188px;
+  }
+  .q-grip, .q-files { display: none; }
+  .q-check, .f-check { min-width: 44px; min-height: 44px; }
+  .fhead, .frow {
+    grid-template-columns: 44px minmax(0, 1.8fr) 88px 64px 84px 76px;
+  }
+
+  /* Tablet controls use the same 44px touch target as the phone layout. */
+  .envchip, .urlchip { height: 44px; min-height: 44px; }
+  .btn, .btn-sm, .iconbtn, .seg-btn, .chip, .preset-btn, .viewtab, .cmd-chip,
+  .search, .select-sm, .sortbtn, .media-row,
+  .field input[type="text"],
+  .field input[type="password"],
+  .field input[type="number"],
+  .field select,
+  .inputrow input,
+  .input-mode-box textarea,
+  .input-mode-box input,
+  .linkbtn,
+  .check-inline,
+  .cmd-preview summary {
+    min-height: 44px;
+  }
+  .iconbtn { width: 44px; min-width: 44px; height: 44px; }
+  .stepper { height: 48px; }
+  .stepper button { width: 44px; min-height: 46px; }
+  .stepper input { min-height: 46px !important; }
+  .range-wrap input[type="range"] { min-height: 44px; }
+  .cmd-preview summary { display: flex; align-items: center; }
+  .pw-wrap input { padding-right: 48px; }
+  .pw-toggle { width: 44px; height: 44px; right: 0; }
+}
+
+/* Give media-list actions their own row before the desktop panel gets cramped. */
+@media (min-width: 640px) and (max-width: 1399px) {
+  .crow {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "thumb name size"
+      "thumb source ops";
+  }
+  .crow > .crow-thumb, .crow > .kdot { grid-area: thumb; }
+  .crow > .cname { grid-area: name; min-width: 0; }
+  .crow > .csize { grid-area: size; justify-self: end; }
+  .crow > .cid { grid-area: source; }
+  .crow > .ctime { display: none; }
+  .crow > .ops { grid-area: ops; flex-wrap: wrap; }
 }
 
 /* ---------- Mobile Breakpoint (<= 639px, verified at 390px & 320px) ---------- */
@@ -2046,6 +2128,9 @@ body[data-view="logs"] .roundbar {
   #btn-logout span { display: none; }
 
   .envchip { min-height: 44px; height: 44px; padding: 0 var(--s-3); }
+  .topbar-inner > .envchips { flex-wrap: wrap; overflow: visible; }
+  .envchips #env-cookies, .envchips #env-cloud { flex: 1 1 0; justify-content: center; }
+  #env-filter { flex: 1 0 100%; justify-content: center; }
   body[data-mobile-tab="done"] .envchips,
   body[data-mobile-tab="logs"] .envchips {
     display: none;
@@ -2084,39 +2169,6 @@ body[data-view="logs"] .roundbar {
   .iconbtn { min-width: 44px; width: 44px; height: 44px; }
   .linkbtn { padding: 0 var(--s-2); }
   .cmd-preview summary { display: flex; align-items: center; }
-
-  /* 44x44 accessible checkbox hit target with 20x20 visual box */
-  .m-check {
-    width: 44px;
-    height: 44px;
-    border: 0;
-    background: transparent;
-    position: relative;
-  }
-  .m-check::after {
-    content: "";
-    position: absolute;
-    width: 20px;
-    height: 20px;
-    border-radius: 5px;
-    border: 1px solid var(--line-strong);
-    background: var(--p-bg);
-    transition: background-color var(--m-in) var(--m-ease), border-color var(--m-in) var(--m-ease);
-  }
-  .m-check:checked {
-    background: transparent;
-    border-color: transparent;
-  }
-  .m-check:checked::after {
-    background: var(--p-accent);
-    border-color: var(--p-accent);
-  }
-  .m-check::before {
-    position: relative;
-    z-index: 1;
-    width: 10px;
-    height: 6px;
-  }
 
   .q-check, .f-check { width: 44px; height: 44px; }
 
@@ -2174,6 +2226,11 @@ body[data-view="logs"] .roundbar {
   .mob-view-meta {
     font-size: 12px;
     color: var(--p-muted);
+  }
+  .mobile-settings-title {
+    display: block;
+    padding: 0 var(--s-1);
+    font: 600 18px/1.4 var(--font-display);
   }
 
   /* Compact 1-row Statusbar */
@@ -2440,7 +2497,7 @@ body[data-view="logs"] .roundbar {
 
   .mob-badge {
     position: absolute;
-    top: 4px;
+    top: 8px;
     right: calc(50% - 26px);
     min-width: 20px;
     height: 18px;
@@ -2457,7 +2514,7 @@ body[data-view="logs"] .roundbar {
   }
   .mob-dot {
     position: absolute;
-    top: 8px;
+    top: 10px;
     right: calc(50% - 16px);
     width: 8px;
     height: 8px;
@@ -2470,6 +2527,9 @@ body[data-view="logs"] .roundbar {
 /* ---------- Ultra-Compact Phone (<= 359px, e.g. 320px) ---------- */
 @media (max-width: 359px) {
   .urlchip { max-width: 132px; }
+  .input-mode-box textarea { min-height: 64px; }
+  .statusbar { flex-wrap: wrap; }
+  .sb-stats { flex: 1 0 100%; order: 3; white-space: normal; }
   .stepper button { width: 40px; }
 
   .done-actions-bar {
