@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN" data-type="software" data-radius="soft" data-motion="on">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#18191b">
+<meta name="robots" content="noindex,nofollow">
+<title>iOS 快捷指令 · XDL</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2318191b'/%3E%3Cpath d='M8 8l16 16M24 8L8 24' stroke='%23ff4a1f' stroke-width='3.5' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body class="login-page shortcut-landing">
+<main class="login-shell">
+  <section class="panel login-card shortcut-card-landing" aria-labelledby="shortcut-install-title">
+    <div class="login-brand">
+      <div class="tb-brand">
+        <span class="appmark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="15" height="15"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
+        </span>
+        <div class="tb-titles">
+          <h1 class="tb-title" id="shortcut-install-title">XDL 下载</h1>
+          <span class="tb-sub">iOS 快捷指令一键安装</span>
+        </div>
+      </div>
+      <span class="tag tag-ok">Apple 已签名</span>
+    </div>
+
+    <div class="shortcut-install-cta">
+      <a class="btn primary wide login-submit" id="btn-install-shortcut" href="/shortcut/XDL.shortcut">
+        一键获取 XDL 快捷指令
+      </a>
+      <p class="fieldnote">点击下载后，在 Safari 下载列表中打开“XDL下载.shortcut”即可添加到 Apple「快捷指令」App。</p>
+    </div>
+
+    <div class="shortcut-endpoint-item">
+      <span class="shortcut-endpoint-label">当前服务器地址（安装引导第 1 题粘贴）</span>
+      <div class="code-copy-row">
+        <code class="mono" id="landing-server-origin"></code>
+        <button class="btn ghost btn-sm" id="btn-copy-landing-origin" type="button">复制地址</button>
+      </div>
+    </div>
+
+    <ol class="shortcut-steps shortcut-install-steps">
+      <li><strong>下载并添加</strong>：点击上方按钮下载安装包，在 Safari 右上角（或底部）点击下载图标打开并点<strong>添加快捷指令</strong>。</li>
+      <li><strong>完成导入提问</strong>：按屏幕提示填入<strong>服务器地址</strong>（可点上方一键复制）和你的 <strong>Shortcut API Token</strong>（无密码模式可留空）。</li>
+      <li><strong>在 X 中直接分享使用</strong>：浏览推文或博主主页时点 <strong>分享 → XDL 下载</strong>，弹出视频时长限制框并自动派发到服务器（引用转发会自动询问单条或原作者全部媒体）。</li>
+    </ol>
+
+    <div class="shortcut-landing-actions">
+      <a class="btn ghost btn-sm wide" id="btn-goto-console" href="/">前往 XDL 控制台复制 Token</a>
+    </div>
+
+    <div class="login-foot">
+      <span class="mono">iOS 15 – 18 · 图片+视频默认下载</span>
+      <span>支持剪贴板自动兜底</span>
+    </div>
+  </section>
+</main>
+<script>
+(function () {
+  var originEl = document.getElementById("landing-server-origin");
+  var copyBtn = document.getElementById("btn-copy-landing-origin");
+  var origin = window.location.origin || "";
+  if (originEl) originEl.textContent = origin;
+
+  function markCopied() {
+    if (!copyBtn) return;
+    copyBtn.textContent = "已复制";
+    setTimeout(function () { copyBtn.textContent = "复制地址"; }, 1800);
+  }
+
+  function legacyCopy(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      if (document.execCommand("copy")) markCopied();
+    } catch (_) {}
+    document.body.removeChild(ta);
+  }
+
+  if (copyBtn) {
+    copyBtn.addEventListener("click", function () {
+      if (!origin) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(origin).then(markCopied).catch(function () {
+          legacyCopy(origin);
+        });
+      } else {
+        legacyCopy(origin);
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

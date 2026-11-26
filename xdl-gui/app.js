@@ -2785,6 +2785,16 @@ function copyTextWithToast(text, okMsg) {
 function applyShortcutConfig(data) {
   if (!data) return;
   const origin = window.location.origin || "";
+  const dlBtn = $("btn-download-shortcut");
+  if (dlBtn) {
+    const notReady = data.shortcutFileReady === false;
+    dlBtn.href = data.downloadPath || "/shortcut/XDL.shortcut";
+    dlBtn.classList.toggle("is-disabled", notReady);
+    dlBtn.setAttribute("aria-disabled", notReady ? "true" : "false");
+    dlBtn.textContent = notReady
+      ? "安装包尚未构建（见下方手动步骤）"
+      : "一键获取 XDL 快捷指令（.shortcut）";
+  }
   if ($("shortcut-inspect-url")) {
     $("shortcut-inspect-url").textContent = `${origin}${data.inspectPath || "/api/shortcut/inspect"}`;
   }
@@ -2812,6 +2822,8 @@ async function loadShortcutConfig() {
       token: "",
       inspectPath: "/api/shortcut/inspect",
       submitPath: "/api/shortcut/submit",
+      installPath: "/shortcut",
+      downloadPath: "/shortcut/XDL.shortcut",
     });
   }
 }
@@ -2855,6 +2867,16 @@ function bindShortcutEvents() {
   $("btn-copy-shortcut-token")?.addEventListener("click", () => {
     const token = ($("shortcut-token-input")?.value || "").trim();
     copyTextWithToast(token, "Shortcut API Token 已复制");
+  });
+
+  $("btn-copy-shortcut-link")?.addEventListener("click", () => {
+    const link = `${window.location.origin || ""}/shortcut`;
+    copyTextWithToast(link, "一键安装链接已复制，在 iPhone Safari 打开即可");
+  });
+
+  $("btn-copy-shortcut-origin")?.addEventListener("click", () => {
+    const origin = window.location.origin || "";
+    copyTextWithToast(origin, "服务器地址已复制");
   });
 
   let rotateArmTimer = null;
