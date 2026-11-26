@@ -685,6 +685,10 @@ function itemFilterPillHtml(item) {
   return label ? `<span class="q-filter-pill">${escapeHtml(label)}</span>` : "";
 }
 
+function itemKindPillHtml(item) {
+  return item.taskKind === "tweet" ? '<span class="q-kind-pill">单条推文</span>' : "";
+}
+
 function rowHtml(item) {
   const checked = state.selected.has(item.id) ? "checked" : "";
   const pct = Math.round(item.progress || 0);
@@ -707,7 +711,7 @@ function rowHtml(item) {
       <span class="avatar" aria-hidden="true">${escapeHtml(initial)}</span>
       <span class="q-who">
         <span class="q-name"><span class="at">@</span>${escapeHtml(item.user)}</span>
-        <span class="q-subline"><span class="q-meta">${escapeHtml(itemMetaText(item))}</span>${itemFilterPillHtml(item)}</span>
+        <span class="q-subline"><span class="q-meta">${escapeHtml(itemMetaText(item))}</span>${itemKindPillHtml(item)}${itemFilterPillHtml(item)}</span>
       </span>
     </button>
     <span class="qcell q-status">${statusText}</span>
@@ -763,7 +767,7 @@ function patchRow(row, item) {
   if (filesCell.innerHTML !== filesHtml) filesCell.innerHTML = filesHtml;
 
   const subline = row.querySelector(".q-subline");
-  const wantSub = `<span class="q-meta">${escapeHtml(itemMetaText(item))}</span>${itemFilterPillHtml(item)}`;
+  const wantSub = `<span class="q-meta">${escapeHtml(itemMetaText(item))}</span>${itemKindPillHtml(item)}${itemFilterPillHtml(item)}`;
   if (subline && subline.innerHTML !== wantSub) subline.innerHTML = wantSub;
 
   row.querySelector("input[data-act=select]").checked = state.selected.has(item.id);
@@ -1767,15 +1771,22 @@ function refreshDrawer(item) {
 }
 
 function renderDrawer(item) {
-  const url = `https://x.com/${item.user}${state.settings.mediaOnly ? "/media" : ""}`;
+  const isTweet = item.taskKind === "tweet";
+  const url = (isTweet && item.targetUrl)
+    ? item.targetUrl
+    : `https://x.com/${item.user}${state.settings.mediaOnly ? "/media" : ""}`;
   const statusLine = item.status === "failed" && item.error ? `失败 · ${escapeHtml(item.error)}` : (STATUS_LABEL[item.status] || item.status);
   const media = drawerHistoryOpen ? ((drawerHistory && drawerHistory.history) || []) : (Array.isArray(item.recentMedia) ? item.recentMedia : []);
   const filt = item.filterSummary || describeFilter(state.settings) || "不限";
+  const scopeRow = isTweet
+    ? `<dt>任务范围</dt><dd>单条推文${item.tweetId ? ` (${escapeHtml(item.tweetId)})` : ""}</dd>`
+    : "";
 
   els.drawerBody.innerHTML = `
     <dl class="kv">
       <dt>状态</dt><dd data-drawer-status>${statusLine}</dd>
       <dt>进度</dt><dd data-drawer-progress>${Math.round(item.progress || 0)}%</dd>
+      ${scopeRow}
       <dt>筛选规则</dt><dd>${escapeHtml(filt)}</dd>
       <dt>归档统计</dt><dd data-drawer-counts>${drawerCountText(item)}</dd>
       <dt>目标页面</dt><dd><a class="linkbtn" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a></dd>
@@ -1801,7 +1812,7 @@ function openDrawer(id) {
   drawerId = id;
   drawerHistory = null;
   drawerHistoryOpen = false;
-  els.drawerTitle.textContent = `@${item.user}`;
+  els.drawerTitle.textContent = item.taskKind === "tweet" ? `@${item.user} · 单条推文` : `@${item.user}`;
   renderDrawer(item);
   els.drawer.classList.remove("hidden");
   els.drawerBackdrop.classList.remove("hidden");
@@ -2191,7 +2202,7 @@ function bindEvents() {
       state.selected.delete(id);
       postState("/api/remove", { ids: [id] }).then((data) => { if (data) toast(`已移除 @${item.user}`, "ok"); });
     } else if (act === "retry") {
-      postState("/api/retry-account", { user: item.user }).then((data) => {
+      postState("/api/retry-account", { id: item.id, user: item.user }).then((data) => {
         if (data) toast(`@${item.user} 已重新排队`, "ok");
         startPolling();
       });
@@ -2688,7 +2699,7 @@ function bindEvents() {
       renderDrawer(item);
     } else if (act === "retry") {
       closeDrawer();
-      postState("/api/retry-account", { user: item.user }).then(() => startPolling());
+      postState("/api/retry-account", { id: item.id, user: item.user }).then(() => startPolling());
     } else if (act === "remove") {
       state.selected.delete(item.id);
       closeDrawer();
@@ -2758,10 +2769,151 @@ function restoreFocus(element) {
   if (element && element.isConnected) element.focus();
 }
 
+/* ---------- iOS Shortcut Setup Card ---------- */
+
+function copyTextWithToast(text, okMsg) {
+  if (!text) { toast("暂无可复制内容", "warn"); return; }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(() => toast(okMsg || "已复制", "ok"))
+      .catch(() => toast(text, "info"));
+  } else {
+    toast(text, "info");
+  }
+}
+
+function applyShortcutConfig(data) {
+  if (!data) return;
+  const origin = window.location.origin || "";
+  if ($("shortcut-inspect-url")) {
+    $("shortcut-inspect-url").textContent = `${origin}${data.inspectPath || "/api/shortcut/inspect"}`;
+  }
+  if ($("shortcut-submit-url")) {
+    $("shortcut-submit-url").textContent = `${origin}${data.submitPath || "/api/shortcut/submit"}`;
+  }
+  const authOn = data.authRequired !== false;
+  $("shortcut-token-wrap")?.classList.toggle("hidden", !authOn);
+  $("shortcut-noauth-note")?.classList.toggle("hidden", authOn);
+  if ($("shortcut-token-input")) $("shortcut-token-input").value = data.token || "";
+  const tag = $("shortcut-status-tag");
+  if (tag) {
+    tag.textContent = authOn ? "已就绪" : "免 Token";
+    tag.className = "tag tag-ok";
+  }
+}
+
+async function loadShortcutConfig() {
+  try {
+    const data = await api("/api/shortcut/config");
+    applyShortcutConfig(data);
+  } catch {
+    applyShortcutConfig({
+      authRequired: true,
+      token: "",
+      inspectPath: "/api/shortcut/inspect",
+      submitPath: "/api/shortcut/submit",
+    });
+  }
+}
+
+async function runShortcutInspectTest() {
+  const input = $("shortcut-test-url");
+  const out = $("shortcut-test-result");
+  const btn = $("btn-shortcut-test");
+  if (!input || !out || !btn) return;
+  const url = input.value.trim();
+  if (!url) {
+    toast("请先粘贴 X 推文或主页链接", "warn");
+    input.focus();
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = "识别中…";
+  out.classList.remove("hidden", "is-active");
+  out.textContent = "正在通过服务器探测链接结构…";
+  try {
+    const res = await api("/api/shortcut/inspect", { url });
+    out.classList.add("is-active");
+    if (res.isQuote === "yes" && Array.isArray(res.scopeOptions) && res.scopeOptions.length) {
+      out.textContent = `${res.summary || "引用转发"} · 将弹窗选择：${res.scopeOptions.join(" / ")}`;
+    } else {
+      out.textContent = `${res.summary || `@${res.targetUser}`} · 将跳过范围菜单，直接弹出视频时长选项`;
+    }
+  } catch (error) {
+    out.classList.remove("is-active");
+    out.textContent = error.message || "识别失败";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "识别";
+  }
+}
+
+function bindShortcutEvents() {
+  const panel = $("shortcut-panel");
+  if (!panel) return;
+
+  $("btn-copy-shortcut-token")?.addEventListener("click", () => {
+    const token = ($("shortcut-token-input")?.value || "").trim();
+    copyTextWithToast(token, "Shortcut API Token 已复制");
+  });
+
+  let rotateArmTimer = null;
+  $("btn-rotate-shortcut-token")?.addEventListener("click", async () => {
+    const btn = $("btn-rotate-shortcut-token");
+    if (!btn.classList.contains("confirming")) {
+      btn.classList.add("confirming");
+      btn.textContent = "再次点击确认重置";
+      clearTimeout(rotateArmTimer);
+      rotateArmTimer = setTimeout(() => {
+        btn.classList.remove("confirming");
+        btn.textContent = "重置 Token";
+      }, 4000);
+      return;
+    }
+    clearTimeout(rotateArmTimer);
+    btn.classList.remove("confirming");
+    btn.textContent = "重置中…";
+    btn.disabled = true;
+    try {
+      const res = await api("/api/shortcut/token/rotate", {});
+      applyShortcutConfig({
+        authRequired: res.authRequired,
+        token: res.token,
+        inspectPath: "/api/shortcut/inspect",
+        submitPath: "/api/shortcut/submit",
+      });
+      toast("已生成新 Token，请在 iPhone 快捷指令中同步更新", "ok");
+    } catch (error) {
+      toast(error.message || "重置 Token 失败", "bad");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "重置 Token";
+    }
+  });
+
+  panel.addEventListener("click", (event) => {
+    const copyBtn = event.target.closest("[data-copy-target], [data-copy-text]");
+    if (!copyBtn) return;
+    const text = copyBtn.dataset.copyTarget
+      ? ($(copyBtn.dataset.copyTarget)?.textContent || "").trim()
+      : (copyBtn.dataset.copyText || "");
+    copyTextWithToast(text, `已复制：${text}`);
+  });
+
+  $("btn-shortcut-test")?.addEventListener("click", runShortcutInspectTest);
+  $("shortcut-test-url")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runShortcutInspectTest();
+    }
+  });
+}
+
 /* ---------- Init ---------- */
 
 async function init() {
   bindEvents();
+  bindShortcutEvents();
   syncSettingsInputs();
   syncSideDrawerInert();
   try {
@@ -2770,6 +2922,7 @@ async function init() {
     setView("accounts");
     await fetchLogs();
     loadCompleted(true);
+    loadShortcutConfig();
     const syncing = Boolean(data?.env?.cloudSync?.syncing);
     if (data.running || data.busy || data.paused || syncing) startPolling();
   } catch {
