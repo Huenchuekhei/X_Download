@@ -534,7 +534,82 @@
           </div>
         </section>
 
-        <!-- Card 4: Download Parameters & Storage -->
+        <!-- Card 4: iOS Shortcuts Integration (TVDL Style) -->
+        <section class="panel shortcut-panel" id="shortcut-panel" aria-labelledby="shortcut-title">
+          <div class="panel-head">
+            <h2 id="shortcut-title">iOS 快捷指令</h2>
+            <span class="tag tag-ok" id="shortcut-status-tag">已就绪</span>
+          </div>
+          <div class="panel-body">
+            <div class="field" id="shortcut-token-wrap">
+              <label for="shortcut-token-input">Shortcut API Token（填在标头 X-XDL-Token）</label>
+              <div class="pw-wrap">
+                <input id="shortcut-token-input" type="password" readonly autocomplete="off" spellcheck="false" value="" placeholder="加载中…" aria-label="Shortcut API Token">
+                <button class="pw-toggle" type="button" data-pw-target="shortcut-token-input" aria-label="显示密码" aria-pressed="false">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
+              <div class="btnrow">
+                <button class="btn primary btn-sm" id="btn-copy-shortcut-token" type="button">复制 Token</button>
+                <button class="btn danger-ghost btn-sm" id="btn-rotate-shortcut-token" type="button">重置 Token</button>
+              </div>
+            </div>
+
+            <p class="fieldnote hidden" id="shortcut-noauth-note">当前未开启密码保护，iPhone 快捷指令无需填写请求标头 Token。</p>
+
+            <div class="shortcut-endpoints">
+              <div class="shortcut-endpoint-item">
+                <span class="shortcut-endpoint-label">识别接口 (Inspect · POST JSON)</span>
+                <div class="code-copy-row">
+                  <code class="mono" id="shortcut-inspect-url">/api/shortcut/inspect</code>
+                  <button class="btn ghost btn-sm" type="button" data-copy-target="shortcut-inspect-url">复制</button>
+                </div>
+              </div>
+              <div class="shortcut-endpoint-item">
+                <span class="shortcut-endpoint-label">提交接口 (Submit · POST JSON)</span>
+                <div class="code-copy-row">
+                  <code class="mono" id="shortcut-submit-url">/api/shortcut/submit</code>
+                  <button class="btn ghost btn-sm" type="button" data-copy-target="shortcut-submit-url">复制</button>
+                </div>
+              </div>
+            </div>
+
+            <details class="cmd-preview shortcut-guide">
+              <summary>iPhone 搭建步骤（免 Mac · 约 2 分钟）</summary>
+              <ol class="shortcut-steps">
+                <li><strong>新建快捷指令</strong>：命名“XDL 下载”，开启<strong>在共享表单中显示</strong>，仅选 <strong>URL</strong> 和 <strong>文本</strong>，无输入时设为<strong>从剪贴板获取</strong>。</li>
+                <li><strong>保存令牌</strong>：添加<strong>文本</strong>动作并粘贴上方 Token（若需点击复制关键字段名，请使用下方一键复制芯片）。</li>
+                <li><strong>识别链接</strong>：添加<strong>获取 URL 的内容</strong>访问 Inspect 接口（方法 <strong>POST</strong>，标头 <code>X-XDL-Token</code> = Token，请求体 JSON 含 <code>url</code> = 快捷指令输入）。</li>
+                <li><strong>引用转发二选一</strong>：加<strong>如果</strong> <code>词典值(isQuote)</code> 是 <code>yes</code> → <strong>从列表中选择</strong> <code>词典值(scopeOptions)</code> 存为 <code>scope</code>；否则留空。</li>
+                <li><strong>视频时长限制框</strong>：<strong>从列表中选择</strong> <code>词典值(durationOptions)</code> 存为 <code>dur</code>；如果 <code>dur</code> 是 <code>自定义时长</code> → <strong>要求输入</strong> 存为 <code>customDur</code>。</li>
+                <li><strong>提交并通知</strong>：<strong>POST</strong> 请求 Submit 接口（JSON：<code>url</code>、<code>scopeChoice</code>=<code>scope</code>、<code>durationChoice</code>=<code>dur</code>、<code>customDuration</code>=<code>customDur</code>），最后<strong>显示通知</strong> <code>词典值(message)</code>。</li>
+              </ol>
+              <div class="shortcut-copy-chips" aria-label="快捷复制字段名">
+                <button class="copy-chip mono" type="button" data-copy-text="X-XDL-Token">X-XDL-Token</button>
+                <button class="copy-chip mono" type="button" data-copy-text="isQuote">isQuote</button>
+                <button class="copy-chip mono" type="button" data-copy-text="scopeOptions">scopeOptions</button>
+                <button class="copy-chip mono" type="button" data-copy-text="durationOptions">durationOptions</button>
+                <button class="copy-chip" type="button" data-copy-text="自定义时长">自定义时长</button>
+                <button class="copy-chip mono" type="button" data-copy-text="scopeChoice">scopeChoice</button>
+                <button class="copy-chip mono" type="button" data-copy-text="durationChoice">durationChoice</button>
+                <button class="copy-chip mono" type="button" data-copy-text="customDuration">customDuration</button>
+                <button class="copy-chip mono" type="button" data-copy-text="message">message</button>
+              </div>
+              <p class="fieldnote">分享推文或主页时默认抓取图片 + 所选时长限制的视频（全局生效）；引用转发仅额外询问“只下载这条”或“下载 @原作者 全部”。</p>
+            </details>
+
+            <details class="cmd-preview shortcut-test">
+              <summary>在线测试链接识别</summary>
+              <div class="inputrow">
+                <input id="shortcut-test-url" type="url" spellcheck="false" placeholder="粘贴 X 推文、引用转发或主页链接" aria-label="测试识别 X 链接">
+                <button class="btn primary btn-sm" id="btn-shortcut-test" type="button">识别</button>
+              </div>
+              <div class="rule-summary hidden" id="shortcut-test-result" aria-live="polite"></div>
+            </details>
+          </div>
+        </section>
+
+        <!-- Card 5: Download Parameters & Storage -->
         <section class="panel settings-panel" aria-labelledby="settings-title">
           <div class="panel-head">
             <h2 id="settings-title">参数与存储管理</h2>

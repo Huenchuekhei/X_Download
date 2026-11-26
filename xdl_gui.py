@@ -73,6 +73,24 @@ REASON_LABELS = {
     "forbidden": "权限受限",
     "notfound": "文件已删除",
 }
+SHORTCUT_DURATION_OPTIONS = [
+    "不限时长",
+    "≤ 1 分钟",
+    "≤ 3 分钟",
+    "≤ 5 分钟",
+    "≤ 10 分钟",
+    "自定义时长",
+]
+SHORTCUT_RESERVED_PATHS = {
+    "home", "explore", "notifications", "messages", "i", "search",
+    "settings", "compose", "login", "signup", "tos", "privacy",
+    "hashtag", "intent", "share", "account", "download", "about",
+}
+SHORTCUT_X_HOSTS = {
+    "x.com", "www.x.com", "mobile.x.com",
+    "twitter.com", "www.twitter.com", "mobile.twitter.com",
+    "fxtwitter.com", "vxtwitter.com", "fixupx.com", "fixvx.com",
+}
 
 
 def clean_line(line: str) -> str:
@@ -360,6 +378,141 @@ def _extract_cmd_user(token: str) -> str | None:
     return None
 
 
+def _expand_short_url(url: str) -> str:
+    """Resolve shortener links such as https://t.co/... to their canonical destination."""
+    for method in ("HEAD", "GET"):
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"},
+                method=method,
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                resolved = str(resp.geturl() or "").strip()
+                if resolved:
+                    return resolved
+        except urllib.error.HTTPError as exc:
+            resolved = str(exc.geturl() or "").strip()
+            if resolved and resolved != url:
+                return resolved
+            if method == "HEAD" and exc.code in {403, 405, 501}:
+                continue
+            break
+        except Exception:
+            break
+    return url
+
+
+def _parse_shortcut_input(raw: str) -> dict:
+    """Extract and classify an X/Twitter profile URL, tweet URL, or @username."""
+    text = str(raw or "").strip()
+    if not text:
+        raise ValueError("未收到链接或博主用户名")
+
+    url_match = re.search(r"https?://\S+", text, re.I)
+    if url_match:
+        url = url_match.group(0).rstrip(".,!?;:)]}>\"'。，！？、")
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if host in {"t.co", "www.t.co"}:
+            url = _expand_short_url(url)
+            parsed = urlparse(url)
+            host = (parsed.hostname or "").lower()
+        if host not in SHORTCUT_X_HOSTS:
+            raise ValueError("请分享 X / Twitter 推文或博主主页链接")
+        path = re.sub(r"/+$", "", parsed.path or "")
+        tweet_match = re.fullmatch(
+            r"/(?:([A-Za-z0-9_]{1,15})|i(?:/web)?)/status(?:es)?/(\d{5,25})(?:/.*)?",
+            path,
+            re.I,
+        )
+        if tweet_match:
+            url_user = tweet_match.group(1) or ""
+            tweet_id = tweet_match.group(2)
+            canonical_user = url_user or "i"
+            return {
+                "kind": "tweet",
+                "url": f"https://x.com/{canonical_user}/status/{tweet_id}",
+                "urlUser": None if url_user.lower() in SHORTCUT_RESERVED_PATHS else (url_user or None),
+                "tweetId": tweet_id,
+            }
+        profile_match = re.fullmatch(
+            r"/([A-Za-z0-9_]{1,15})(?:/(?:media|likes|with_replies|highlights|header_photo|photo)?)?",
+            path,
+            re.I,
+        )
+        if profile_match:
+            user = profile_match.group(1)
+            if user.lower() not in SHORTCUT_RESERVED_PATHS:
+                return {
+                    "kind": "account",
+                    "url": f"https://x.com/{user}",
+                    "targetUser": user,
+                }
+        raise ValueError("未识别到有效的 X 推文或博主主页链接")
+
+    bare = text.lstrip("@").strip()
+    if USER_RE.fullmatch(bare) and bare.lower() not in SHORTCUT_RESERVED_PATHS:
+        return {
+            "kind": "account",
+            "url": f"https://x.com/{bare}",
+            "targetUser": bare,
+        }
+    raise ValueError("未识别到有效的 X / Twitter 推文或博主链接")
+
+
+def _parse_shortcut_duration(choice: str | None, custom: str | None = None) -> tuple[bool, int]:
+    """Parse Shortcut duration picker labels or custom text into (enabled, seconds)."""
+    raw_choice = str(choice or "").strip()
+    raw_custom = str(custom or "").strip()
+    presets = {
+        "": (False, 0),
+        "不限时长": (False, 0),
+        "不限": (False, 0),
+        "0": (False, 0),
+        "off": (False, 0),
+        "none": (False, 0),
+        "unlimited": (False, 0),
+        "≤ 1 分钟": (True, 60),
+        "≤1分钟": (True, 60),
+        "1分钟": (True, 60),
+        "≤ 3 分钟": (True, 180),
+        "≤3分钟": (True, 180),
+        "3分钟": (True, 180),
+        "≤ 5 分钟": (True, 300),
+        "≤5分钟": (True, 300),
+        "5分钟": (True, 300),
+        "≤ 10 分钟": (True, 600),
+        "≤10分钟": (True, 600),
+        "10分钟": (True, 600),
+    }
+    low_choice = raw_choice.lower()
+    if low_choice in presets:
+        return presets[low_choice]
+
+    candidate = (
+        raw_custom
+        if raw_choice in {"自定义时长", "自定义"} or low_choice == "custom"
+        else raw_choice
+    ).strip()
+    if not candidate or candidate.lower() in {"0", "off", "none", "不限", "不限时长", "unlimited"}:
+        return (False, 0)
+
+    normalized = candidate.replace("：", ":")
+    normalized = re.sub(r"^[≤<=<\s]+", "", normalized)
+    normalized = (
+        normalized.replace("小时", "h")
+        .replace("分钟", "m")
+        .replace("分", "m")
+        .replace("秒钟", "s")
+        .replace("秒", "s")
+    )
+    secs = xdl.parse_duration_seconds(normalized)
+    if secs <= 0:
+        return (False, 0)
+    return (True, max(5, min(7200, secs)))
+
+
 class AppState:
     def __init__(
         self,
@@ -426,6 +579,7 @@ class AppState:
         self.backfill_lock = threading.Lock()
         self.thumb_backfill_lock = threading.Lock()
         self.thumb_backfilling = False
+        self._shortcut_inspect_cache: dict[str, tuple[float, dict]] = {}
         self.load()
         self.add_log("info", "XDL Web 工作台已就绪，支持 CLI 命令、实时日志与视频时长过滤")
         if start_background:
@@ -953,7 +1107,11 @@ class AppState:
         added = 0
         skipped = 0
         with self.lock:
-            existing = {item["user"].lower() for item in self.queue}
+            existing = {
+                item["user"].lower()
+                for item in self.queue
+                if item.get("taskKind", "account") != "tweet"
+            }
             for user in users:
                 user = str(user).strip().lstrip("@")
                 if not USER_RE.fullmatch(user):
@@ -963,6 +1121,7 @@ class AppState:
                     continue
                 item = {
                     "id": self.next_id,
+                    "taskKind": "account",
                     "user": user,
                     "status": "waiting",
                     "progress": 0,
@@ -1259,7 +1418,7 @@ class AppState:
         with self.lock:
             wanted = {u.lower() for u in targets}
             for item in self.queue:
-                if item["user"].lower() in wanted:
+                if item.get("taskKind", "account") != "tweet" and item["user"].lower() in wanted:
                     item["filterSummary"] = filt_label
                     if item.get("status") in {"done", "failed", "paused"}:
                         item["status"] = "waiting"
@@ -1279,20 +1438,23 @@ class AppState:
 
     # ---------- scheduling ----------
 
-    def start(self) -> None:
+    def start(self, *, requeue_done: bool = True, resume_paused: bool = True) -> None:
         with self.lock:
             filt_label = describe_filter(self.settings)
             for item in self.queue:
-                if item.get("status") == "paused":
+                if resume_paused and item.get("status") == "paused":
                     item["status"] = "waiting"
                     item["filterSummary"] = filt_label
-                elif item.get("status") == "done":
+                elif requeue_done and item.get("status") == "done":
                     item["status"] = "waiting"
                     item["progress"] = 0
                     item["error"] = None
                     item["newFiles"] = 0
                     item["skippedFiles"] = 0
                     item["filterSummary"] = filt_label
+            if not requeue_done and self.running and not self.paused:
+                self.mark_dirty()
+                return
             if self.round_summary is not None:
                 self.round += 1
                 self.round_stats = {"ok": 0, "failed": 0, "files": 0, "skipped": 0}
@@ -1376,9 +1538,11 @@ class AppState:
         item["filterSummary"] = describe_filter(settings)
         user = item["user"]
         item_id = item["id"]
+        task_kind = item.get("taskKind") or "account"
+        task_label = "单条推文任务" if task_kind == "tweet" else "任务"
         self.add_log(
             "info",
-            f"开始任务 @{user}" + (f"（{item['filterSummary']}）" if item["filterSummary"] else ""),
+            f"开始{task_label} @{user}" + (f"（{item['filterSummary']}）" if item["filterSummary"] else ""),
             user=user,
         )
         self.mark_dirty()
@@ -1423,6 +1587,9 @@ class AppState:
                 return
             output = settings["output"]
             flat = settings.get("layout") == "flat"
+            task_kind = item.get("taskKind") or "account"
+            target_url = str(item.get("targetUrl") or "").strip()
+            include_quoted = bool(item.get("includeQuoted"))
 
         targets: list[tuple[str, list[int]]] = []
         if failure_ids:
@@ -1439,6 +1606,8 @@ class AppState:
                     f"https://x.com/{user}" + ("/media" if settings["mediaOnly"] else "")
                 )
                 targets.append((target, ids))
+        elif task_kind == "tweet" and target_url:
+            targets.append((target_url, []))
         else:
             target = f"https://x.com/{user}" + ("/media" if settings["mediaOnly"] else "")
             targets.append((target, []))
@@ -1454,6 +1623,7 @@ class AppState:
             target_ok, failures, stats = self._run_gallery(
                 item_id, user, target, settings,
                 is_tweet="/status/" in target,
+                include_quoted=include_quoted,
             )
             ok = ok and target_ok
             run_stats["newFiles"] += int(stats.get("newFiles") or 0)
@@ -1557,9 +1727,10 @@ class AppState:
             self.round_stats["skipped"] += int(run_stats["skippedFiles"])
             if item["status"] == "done":
                 self.round_stats["ok"] += 1
+                done_prefix = "单条推文完成" if task_kind == "tweet" else "完成"
                 self.add_log(
                     "ok",
-                    f"@{user} 完成：新增 {item['newFiles']} · 跳过 {item['skippedFiles']} · 累计 {item['downloadedTotal']} 个媒体",
+                    f"@{user} {done_prefix}：新增 {item['newFiles']} · 跳过 {item['skippedFiles']} · 累计 {item['downloadedTotal']} 个媒体",
                     user=user,
                 )
             else:
@@ -1582,6 +1753,27 @@ class AppState:
                 daemon=True,
             ).start()
 
+    def _resolve_gallery_env(self, settings: dict) -> tuple[str | None, str | None, str | None]:
+        """Resolve (cookies_config, proxy, error_message) from settings."""
+        cookies_source = settings.get("cookiesSource", "file")
+        cookies_browser = settings.get("cookiesBrowser", "chrome")
+        if cookies_source == "browser":
+            if cookies_browser not in xdl.SUPPORTED_BROWSERS:
+                return None, None, f"不支持的浏览器 Cookie 来源: {cookies_browser}"
+            cookies_config = f"cookies-from-browser:{cookies_browser}"
+        else:
+            cookies = Path(settings["cookies"])
+            if not cookies.is_file():
+                return None, None, f"Cookie 文件不存在: {cookies}"
+            cookies_config = str(cookies)
+
+        proxy = None
+        if settings.get("proxyMode") == "manual":
+            proxy = settings.get("proxyAddr")
+        elif settings.get("proxyMode") == "auto" and xdl.default_proxy_available():
+            proxy = xdl.DEFAULT_PROXY
+        return cookies_config, proxy, None
+
     def _run_gallery(
         self,
         item_id: int,
@@ -1589,33 +1781,19 @@ class AppState:
         target: str,
         settings: dict,
         is_tweet: bool,
+        include_quoted: bool = False,
     ) -> tuple[bool, list[dict], dict]:
         empty_stats = {"newFiles": 0, "skippedFiles": 0, "recentMedia": []}
-        cookies_source = settings.get("cookiesSource", "file")
-        cookies_browser = settings.get("cookiesBrowser", "chrome")
-        if cookies_source == "browser":
-            if cookies_browser not in xdl.SUPPORTED_BROWSERS:
-                return False, [{
-                    "user": user,
-                    "name": f"@{user} 账号级失败",
-                    "reason": "forbidden",
-                    "note": f"不支持的浏览器 Cookie 来源: {cookies_browser}",
-                    "tweetId": None,
-                    "size": "—",
-                }], empty_stats
-            cookies_config = f"cookies-from-browser:{cookies_browser}"
-        else:
-            cookies = Path(settings["cookies"])
-            if not cookies.is_file():
-                return False, [{
-                    "user": user,
-                    "name": f"@{user} 账号级失败",
-                    "reason": "forbidden",
-                    "note": f"Cookie 文件不存在: {cookies}",
-                    "tweetId": None,
-                    "size": "—",
-                }], empty_stats
-            cookies_config = str(cookies)
+        cookies_config, proxy, env_err = self._resolve_gallery_env(settings)
+        if env_err:
+            return False, [{
+                "user": user,
+                "name": f"@{user} 账号级失败",
+                "reason": "forbidden",
+                "note": env_err,
+                "tweetId": None,
+                "size": "—",
+            }], empty_stats
 
         output_dir = Path(settings["output"])
         flat_layout = settings.get("layout") == "flat"
@@ -1632,12 +1810,6 @@ class AppState:
                 "size": "—",
             }], empty_stats
 
-        proxy = None
-        if settings["proxyMode"] == "manual":
-            proxy = settings["proxyAddr"]
-        elif settings["proxyMode"] == "auto" and xdl.default_proxy_available():
-            proxy = xdl.DEFAULT_PROXY
-
         media_type = xdl.normalize_media_type(settings.get("mediaType"))
         max_duration = effective_max_duration(settings)
         args = SimpleNamespace(
@@ -1648,6 +1820,7 @@ class AppState:
             stop_after_skips=int(settings.get("stopAfterSkips") or 0),
             media_type=media_type,
             max_duration=max_duration,
+            quoted=bool(include_quoted),
         )
         backfill_key = f"{user.lower()}|{str(media_dir).lower()}"
         if backfill_key not in self.backfilled:
@@ -1797,6 +1970,449 @@ class AppState:
             })
         return returncode == 0 and not failures, failures, stats
 
+    def _probe_tweet_with_gallery_dl(self, target_url: str, settings: dict) -> dict:
+        """Inspect tweet and quoted-tweet metadata using gallery-dl --dump-json."""
+        cookies_config, proxy, env_err = self._resolve_gallery_env(settings)
+        if env_err:
+            return {"error": env_err, "tweets": {}, "order": []}
+
+        probe_args = SimpleNamespace(
+            proxy=proxy,
+            media_only=False,
+            limit=0,
+            incremental=False,
+            stop_after_skips=0,
+            media_type="all",
+            max_duration=0,
+            quoted=True,
+            text_tweets=True,
+        )
+        config = xdl.build_config("probe", str(settings.get("output") or xdl.DEFAULT_OUTPUT_DIR), cookies_config, probe_args)
+        twitter_cfg = config.get("extractor", {}).get("twitter", {})
+        twitter_cfg["replies"] = False
+        twitter_cfg["pinned"] = False
+        twitter_cfg["retweets"] = False
+        twitter_cfg["cards"] = False
+        config.pop("archive", None)
+        config["skip"] = False
+        if isinstance(config.get("output"), dict):
+            config["output"]["skip"] = False
+
+        config_path = Path(tempfile.gettempdir()) / f"xdl_probe_{os.getpid()}_{time.time_ns()}.json"
+        entries: list = []
+        probe_err: str | None = None
+        try:
+            config_path.write_text(
+                json.dumps(config, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            cmd = [
+                sys.executable, "-m", "gallery_dl",
+                "--config", str(config_path),
+                "--dump-json",
+            ]
+            if proxy:
+                cmd.extend(["--proxy", proxy])
+            cmd.append(target_url)
+            env = dict(os.environ)
+            env["PYTHONIOENCODING"] = "utf-8"
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=12,
+                env=env,
+            )
+            raw_out = (proc.stdout or "").strip()
+            if raw_out:
+                try:
+                    parsed_out = json.loads(raw_out)
+                    if isinstance(parsed_out, list):
+                        entries = parsed_out
+                except json.JSONDecodeError:
+                    for line in raw_out.splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            item = json.loads(line)
+                            if isinstance(item, list):
+                                entries.append(item)
+                        except json.JSONDecodeError:
+                            continue
+            if proc.returncode != 0 and not entries:
+                err_tail = clean_line((proc.stderr or "")[-260:])
+                probe_err = err_tail or f"gallery-dl 探测退出码 {proc.returncode}"
+        except Exception as exc:
+            probe_err = str(exc)
+        finally:
+            try:
+                config_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        tweets: dict[str, dict] = {}
+        order: list[str] = []
+        for entry in entries:
+            if not isinstance(entry, list) or len(entry) < 2 or not isinstance(entry[-1], dict):
+                continue
+            meta = entry[-1]
+            tid = str(meta.get("tweet_id") or "").strip()
+            if not tid:
+                continue
+            author_obj = meta.get("author") if isinstance(meta.get("author"), dict) else {}
+            user_obj = meta.get("user") if isinstance(meta.get("user"), dict) else {}
+            author = str(author_obj.get("name") or user_obj.get("name") or "").strip().lstrip("@")
+            quote_id_raw = meta.get("quote_id")
+            quote_id = str(quote_id_raw).strip() if quote_id_raw not in {None, 0, "0", ""} else ""
+            retweet_id_raw = meta.get("retweet_id")
+            retweet_id = str(retweet_id_raw).strip() if retweet_id_raw not in {None, 0, "0", ""} else ""
+            quote_by_raw = meta.get("quote_by")
+            quote_by = ""
+            if isinstance(quote_by_raw, dict):
+                quote_by = str(quote_by_raw.get("name") or "").strip().lstrip("@")
+            elif isinstance(quote_by_raw, str):
+                quote_by = quote_by_raw.strip().lstrip("@")
+
+            rec = tweets.get(tid)
+            if rec is None:
+                rec = {
+                    "tweetId": tid,
+                    "author": author,
+                    "hasMedia": False,
+                    "hasVideo": False,
+                    "quoteId": quote_id,
+                    "retweetId": retweet_id,
+                    "quoteBy": quote_by,
+                }
+                tweets[tid] = rec
+                order.append(tid)
+            elif not rec["author"] and author:
+                rec["author"] = author
+            if quote_id and not rec["quoteId"]:
+                rec["quoteId"] = quote_id
+            if retweet_id and not rec["retweetId"]:
+                rec["retweetId"] = retweet_id
+            if quote_by and not rec["quoteBy"]:
+                rec["quoteBy"] = quote_by
+            if entry[0] == 3:
+                rec["hasMedia"] = True
+                if str(meta.get("type") or "").lower() in {"video", "animated_gif"}:
+                    rec["hasVideo"] = True
+
+        return {"error": probe_err, "tweets": tweets, "order": order}
+
+    def _get_cached_shortcut_inspect(self, tweet_id: str) -> dict | None:
+        now = time.monotonic()
+        with self.lock:
+            entry = self._shortcut_inspect_cache.get(f"tweet:{tweet_id}")
+            if not entry:
+                return None
+            ts, data = entry
+            if now - ts > 600:
+                self._shortcut_inspect_cache.pop(f"tweet:{tweet_id}", None)
+                return None
+            return dict(data)
+
+    def _store_cached_shortcut_inspect(self, tweet_id: str, data: dict) -> None:
+        now = time.monotonic()
+        with self.lock:
+            stale = [k for k, (ts, _) in self._shortcut_inspect_cache.items() if now - ts > 600]
+            for k in stale:
+                self._shortcut_inspect_cache.pop(k, None)
+            if len(self._shortcut_inspect_cache) >= 100:
+                oldest_key = min(self._shortcut_inspect_cache, key=lambda k: self._shortcut_inspect_cache[k][0])
+                self._shortcut_inspect_cache.pop(oldest_key, None)
+            self._shortcut_inspect_cache[f"tweet:{tweet_id}"] = (now, dict(data))
+
+    def inspect_shortcut_url(self, raw_url: str, *, use_cache: bool = True) -> dict:
+        """Analyze a shared X link so iOS Shortcuts knows whether to prompt for scope."""
+        parsed = _parse_shortcut_input(raw_url)
+        if parsed["kind"] == "account":
+            target_user = parsed["targetUser"]
+            return {
+                "ok": True,
+                "kind": "account",
+                "url": parsed["url"],
+                "targetUser": target_user,
+                "tweetUser": None,
+                "quotedUser": None,
+                "tweetId": None,
+                "quotedTweetId": None,
+                "quotedUrl": None,
+                "singleTargetUser": target_user,
+                "singleTargetTweetId": None,
+                "singleTargetUrl": parsed["url"],
+                "singleIncludeQuoted": False,
+                "needsScopeChoice": False,
+                "isQuote": "no",
+                "scopeOptions": [],
+                "durationOptions": list(SHORTCUT_DURATION_OPTIONS),
+                "defaultScope": "account",
+                "summary": f"@{target_user} 主页（直接下载全部媒体）",
+            }
+
+        tweet_id = parsed["tweetId"]
+        if use_cache:
+            cached = self._get_cached_shortcut_inspect(tweet_id)
+            if cached is not None:
+                return cached
+
+        with self.lock:
+            settings = dict(self.settings)
+
+        probe = self._probe_tweet_with_gallery_dl(parsed["url"], settings)
+        tweets = probe.get("tweets") or {}
+        order = probe.get("order") or []
+        outer = tweets.get(tweet_id)
+
+        quoted_entry = None
+        for tid in order:
+            if tid != tweet_id:
+                cand = tweets[tid]
+                if not cand.get("retweetId"):
+                    quoted_entry = cand
+                    break
+
+        is_quote = bool(
+            quoted_entry
+            or (outer and outer.get("quoteId"))
+            or any(rec.get("quoteBy") for rec in tweets.values())
+        )
+        tweet_user = (outer and outer.get("author")) or parsed.get("urlUser") or ""
+        quoted_user = (quoted_entry and quoted_entry.get("author")) or ""
+        quoted_tid = (quoted_entry and quoted_entry.get("tweetId")) or (outer and outer.get("quoteId")) or None
+        quoted_url = f"https://x.com/{quoted_user}/status/{quoted_tid}" if (quoted_user and quoted_tid) else None
+
+        if is_quote and quoted_user and (
+            (quoted_entry and quoted_entry.get("hasMedia"))
+            or not (outer and outer.get("hasMedia"))
+        ):
+            preferred_creator = quoted_user
+        else:
+            preferred_creator = tweet_user or quoted_user
+
+        if not preferred_creator:
+            detail = probe.get("error") or "无法识别推文作者，请检查服务器 Cookie 与网络状态"
+            raise ValueError(f"推文信息解析失败：{detail}")
+
+        if is_quote:
+            needs_scope = True
+            is_quote_str = "yes"
+            scope_options = [
+                "只下载这个链接的",
+                f"下载 @{preferred_creator} 全部媒体",
+            ]
+            if (
+                quoted_entry
+                and quoted_entry.get("hasMedia")
+                and not (outer and outer.get("hasMedia"))
+                and quoted_user
+                and quoted_tid
+            ):
+                single_target_user = quoted_user
+                single_target_tweet_id = quoted_tid
+                single_target_url = f"https://x.com/{quoted_user}/status/{quoted_tid}"
+                single_include_quoted = False
+            else:
+                single_target_user = tweet_user or preferred_creator
+                single_target_tweet_id = tweet_id
+                single_target_url = f"https://x.com/{single_target_user}/status/{tweet_id}"
+                single_include_quoted = True
+            summary = f"引用转发（原作者 @{preferred_creator}）"
+        else:
+            needs_scope = False
+            is_quote_str = "no"
+            scope_options = []
+            single_target_user = preferred_creator
+            single_target_tweet_id = tweet_id
+            single_target_url = f"https://x.com/{preferred_creator}/status/{tweet_id}"
+            single_include_quoted = False
+            summary = f"普通推文 @{preferred_creator}（直接下载全部媒体）"
+
+        result = {
+            "ok": True,
+            "kind": "tweet",
+            "url": parsed["url"],
+            "targetUser": preferred_creator,
+            "tweetUser": tweet_user or None,
+            "quotedUser": quoted_user or None,
+            "tweetId": tweet_id,
+            "quotedTweetId": quoted_tid,
+            "quotedUrl": quoted_url,
+            "singleTargetUser": single_target_user,
+            "singleTargetTweetId": single_target_tweet_id,
+            "singleTargetUrl": single_target_url,
+            "singleIncludeQuoted": single_include_quoted,
+            "needsScopeChoice": needs_scope,
+            "isQuote": is_quote_str,
+            "scopeOptions": scope_options,
+            "durationOptions": list(SHORTCUT_DURATION_OPTIONS),
+            "defaultScope": "account",
+            "summary": summary,
+        }
+        if tweets:
+            self._store_cached_shortcut_inspect(tweet_id, result)
+        return result
+
+    def submit_shortcut_task(self, payload: dict) -> dict:
+        """Apply global duration filter, enqueue account or single tweet, and start async."""
+        raw_url = str(payload.get("url") or "").strip()
+        scope_choice = str(payload.get("scopeChoice") or "").strip()
+        duration_choice = str(payload.get("durationChoice") or "").strip()
+        custom_duration = str(payload.get("customDuration") or "").strip()
+
+        parsed = _parse_shortcut_input(raw_url)
+        dur_enabled, max_dur = _parse_shortcut_duration(duration_choice, custom_duration)
+
+        settings_patch: dict = {
+            "mediaType": "all",
+            "durationFilterEnabled": bool(dur_enabled),
+        }
+        if dur_enabled:
+            settings_patch["maxVideoDuration"] = int(max_dur)
+        self.update_settings(settings_patch)
+        filt_label = describe_filter(self.settings)
+
+        want_single_tweet = parsed["kind"] == "tweet" and (
+            scope_choice.startswith("只下载")
+            or scope_choice.lower() in {"tweet", "single", "this", "only"}
+        )
+
+        inspected: dict | None = None
+        if parsed["kind"] == "tweet":
+            inspected = self._get_cached_shortcut_inspect(parsed["tweetId"])
+
+        handle_match = re.search(r"@([A-Za-z0-9_]{1,15})", scope_choice)
+        chosen_handle = handle_match.group(1) if handle_match else ""
+
+        if want_single_tweet:
+            if inspected is None and not parsed.get("urlUser"):
+                inspected = self.inspect_shortcut_url(raw_url)
+            if inspected is not None:
+                target_user = inspected.get("singleTargetUser") or inspected.get("targetUser")
+                single_tweet_id = inspected.get("singleTargetTweetId") or parsed["tweetId"]
+                single_url = inspected.get("singleTargetUrl") or parsed["url"]
+                include_quoted = bool(inspected.get("singleIncludeQuoted"))
+            else:
+                target_user = parsed.get("urlUser") or chosen_handle
+                single_tweet_id = parsed["tweetId"]
+                single_url = f"https://x.com/{target_user}/status/{single_tweet_id}" if target_user else parsed["url"]
+                include_quoted = True
+            if not target_user or not USER_RE.fullmatch(str(target_user)):
+                raise ValueError("无法识别推文所属博主用户名")
+
+            with self.lock:
+                existing_item = next(
+                    (
+                        item for item in self.queue
+                        if item.get("taskKind") == "tweet"
+                        and str(item.get("tweetId") or "") == str(single_tweet_id)
+                    ),
+                    None,
+                )
+                if existing_item is not None:
+                    existing_item["user"] = target_user
+                    existing_item["targetUrl"] = single_url
+                    existing_item["includeQuoted"] = include_quoted
+                    existing_item["filterSummary"] = filt_label
+                    existing_item["displayNote"] = "单条推文"
+                    if existing_item.get("status") != "active":
+                        existing_item["status"] = "waiting"
+                        existing_item["progress"] = 0
+                        existing_item["error"] = None
+                        existing_item["newFiles"] = 0
+                        existing_item["skippedFiles"] = 0
+                else:
+                    item = {
+                        "id": self.next_id,
+                        "taskKind": "tweet",
+                        "tweetId": str(single_tweet_id),
+                        "targetUrl": single_url,
+                        "includeQuoted": include_quoted,
+                        "displayNote": "单条推文",
+                        "user": target_user,
+                        "status": "waiting",
+                        "progress": 0,
+                        "files": 0,
+                        "error": None,
+                        "failedCount": 0,
+                        "retried": False,
+                        "retryOnly": False,
+                        "newFiles": 0,
+                        "skippedFiles": 0,
+                        "downloadedTotal": 0,
+                        "filterSummary": filt_label,
+                    }
+                    try:
+                        known = xdl.media_count(target_user)
+                        item["files"] = known
+                        item["downloadedTotal"] = known
+                        item["recentMedia"] = xdl.recent_media(target_user, 6)
+                    except Exception:
+                        item["recentMedia"] = []
+                    self.queue.append(item)
+                    self.next_id += 1
+                self.add_log(
+                    "info",
+                    f"[iOS 快捷指令] 已加入单条推文 @{target_user} ({single_tweet_id})"
+                    + (f"（{filt_label}）" if filt_label else ""),
+                    user=target_user,
+                )
+                self.mark_dirty()
+        else:
+            if parsed["kind"] == "account":
+                target_user = parsed["targetUser"]
+            elif chosen_handle and USER_RE.fullmatch(chosen_handle):
+                target_user = chosen_handle
+            elif inspected and inspected.get("targetUser"):
+                target_user = inspected["targetUser"]
+            elif parsed.get("urlUser"):
+                target_user = parsed["urlUser"]
+            else:
+                inspected = self.inspect_shortcut_url(raw_url)
+                target_user = inspected.get("targetUser") or ""
+
+            if not target_user or not USER_RE.fullmatch(str(target_user)):
+                raise ValueError("无法识别博主用户名")
+
+            self.add_users([target_user])
+            with self.lock:
+                for item in self.queue:
+                    if item.get("taskKind", "account") != "tweet" and item["user"].lower() == target_user.lower():
+                        item["filterSummary"] = filt_label
+                        if item.get("status") in {"done", "failed", "paused"}:
+                            item["status"] = "waiting"
+                            item["progress"] = 0
+                            item["error"] = None
+                            item["newFiles"] = 0
+                            item["skippedFiles"] = 0
+                self.add_log(
+                    "info",
+                    f"[iOS 快捷指令] 已加入博主 @{target_user}"
+                    + (f"（{filt_label}）" if filt_label else ""),
+                    user=target_user,
+                )
+                self.mark_dirty()
+
+        self.start(requeue_done=False, resume_paused=False)
+
+        dur_text = f"视频 ≤ {xdl.format_duration(max_dur)}" if dur_enabled else "视频不限时长"
+        mode_text = "单条推文" if want_single_tweet else "全部媒体"
+        return {
+            "ok": True,
+            "status": "success",
+            "mode": "tweet" if want_single_tweet else "account",
+            "user": target_user,
+            "tweetId": str(single_tweet_id) if want_single_tweet else None,
+            "filterSummary": filt_label or "图片 + 视频（不限时长）",
+            "title": "XDL 已加入下载队列",
+            "message": f"@{target_user}（{mode_text} · 图片 + {dur_text}）已开始后台下载",
+            "state": self.snapshot(),
+        }
+
     # ---------- failures / rounds ----------
 
     def _find_item(self, item_id: int) -> dict | None:
@@ -1885,12 +2501,23 @@ class AppState:
             self.mark_dirty()
             return {"queued": queued}
 
-    def retry_account(self, user: str) -> dict:
+    def retry_account(self, user: str, item_id: int | None = None) -> dict:
         with self.lock:
-            item = next(
-                (entry for entry in self.queue if entry["user"].lower() == user.lower()),
-                None,
-            )
+            item = self._find_item(int(item_id)) if item_id is not None else None
+            if item is None:
+                item = next(
+                    (
+                        entry for entry in self.queue
+                        if entry.get("taskKind", "account") != "tweet"
+                        and entry["user"].lower() == user.lower()
+                    ),
+                    None,
+                )
+            if item is None:
+                item = next(
+                    (entry for entry in self.queue if entry["user"].lower() == user.lower()),
+                    None,
+                )
             if item is None:
                 return {"ok": False, "error": "账号不在队列中"}
             pending = self._pending_for(item["id"])
@@ -2881,6 +3508,43 @@ class Handler(SimpleHTTPRequestHandler):
             return None
         return sess
 
+    def _shortcut_token(self, payload: dict | None = None) -> str | None:
+        direct = str(self.headers.get("X-XDL-Token") or "").strip()
+        if direct:
+            return direct
+        auth_hdr = str(self.headers.get("Authorization") or "").strip()
+        if auth_hdr.lower().startswith("bearer "):
+            bearer = auth_hdr[7:].strip()
+            if bearer:
+                return bearer
+        if isinstance(payload, dict) and isinstance(payload.get("token"), str):
+            tok = payload["token"].strip()
+            if tok:
+                return tok
+        return None
+
+    def _require_shortcut_auth(self, payload: dict | None = None) -> dict | None:
+        if not self.app.auth_required:
+            return {"username": "local", "via": "local"}
+        sess = self._current_session()
+        if sess is not None:
+            return sess
+        tok_user = self.app.auth.validate_shortcut_token(self._shortcut_token(payload))
+        if tok_user is not None:
+            return tok_user
+        self._json(
+            {
+                "ok": False,
+                "authRequired": True,
+                "status": "error",
+                "title": "XDL 认证失败",
+                "message": "Shortcut Token 无效或已重置，请前往 XDL 网页端复制最新 Token",
+                "error": "Shortcut Token 无效或未提供",
+            },
+            401,
+        )
+        return None
+
     def _redirect(self, location: str, status: int = 302) -> None:
         self.send_response(status)
         self.send_header("Location", location)
@@ -3113,6 +3777,17 @@ class Handler(SimpleHTTPRequestHandler):
         if route == "/api/state":
             self._json(self.app.snapshot())
             return
+        if route == "/api/shortcut/config":
+            token = self.app.auth.get_shortcut_token(create=True) if self.app.auth_required else ""
+            self._json({
+                "ok": True,
+                "authRequired": self.app.auth_required,
+                "token": token or "",
+                "inspectPath": "/api/shortcut/inspect",
+                "submitPath": "/api/shortcut/submit",
+                "durationOptions": list(SHORTCUT_DURATION_OPTIONS),
+            })
+            return
         if route == "/api/logs":
             try:
                 since = max(0, int((query.get("since") or ["0"])[0]))
@@ -3311,6 +3986,30 @@ class Handler(SimpleHTTPRequestHandler):
                 )
                 return
 
+            if route in {"/api/shortcut/inspect", "/api/shortcut/submit"}:
+                if self._require_shortcut_auth(payload) is None:
+                    return
+                self.app.touch_activity()
+                try:
+                    if route == "/api/shortcut/inspect":
+                        result = self.app.inspect_shortcut_url(payload.get("url") or "")
+                    else:
+                        result = self.app.submit_shortcut_task(payload)
+                    self._json(result)
+                except ValueError as exc:
+                    msg = str(exc)
+                    self._json(
+                        {
+                            "ok": False,
+                            "status": "error",
+                            "title": "XDL 快捷指令处理失败",
+                            "message": msg,
+                            "error": msg,
+                        },
+                        400,
+                    )
+                return
+
             sess = self._require_auth_json()
             if sess is None:
                 return
@@ -3493,8 +4192,17 @@ class Handler(SimpleHTTPRequestHandler):
                 result = self.app.retry_failures(payload.get("ids") or [])
                 self._json({"ok": True, **result, "state": self.app.snapshot()})
             elif route == "/api/retry-account":
-                result = self.app.retry_account(payload.get("user") or "")
+                raw_id = payload.get("id")
+                item_id = int(raw_id) if raw_id not in {None, ""} else None
+                result = self.app.retry_account(payload.get("user") or "", item_id=item_id)
                 self._json({"ok": True, **result, "state": self.app.snapshot()})
+            elif route == "/api/shortcut/token/rotate":
+                if not self.app.auth_required:
+                    self._json({"ok": True, "authRequired": False, "token": ""})
+                    return
+                new_token = self.app.auth.rotate_shortcut_token()
+                self.app.add_log("warn", "已重置 iOS 快捷指令 API Token，旧 Token 已立即失效")
+                self._json({"ok": True, "authRequired": True, "token": new_token or ""})
             elif route == "/api/remove":
                 self.app.remove_items(payload.get("ids") or [])
                 self._json({"ok": True, "state": self.app.snapshot()})

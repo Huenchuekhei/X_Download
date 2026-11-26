@@ -1167,12 +1167,12 @@ def build_config(username: str, output_dir: str, cookies_config: str | None, arg
         "retries": 3,
         "videos": True,
         "cards": False,
-        "quoted": False,
+        "quoted": bool(getattr(args, "quoted", False)),
         "conversations": False,
         "pinned": True,
         "replies": True,
         "retweets": False,
-        "text-tweets": False,
+        "text-tweets": bool(getattr(args, "text_tweets", False)),
     }
 
     media_type = normalize_media_type(getattr(args, "media_type", "all"))

@@ -266,6 +266,11 @@ class AuthManager:
             "updatedAt": int(time.time()),
         }
         with self.lock:
+            prev = self._read_record_locked()
+            if prev and isinstance(prev.get("shortcutToken"), str) and prev["shortcutToken"].strip():
+                record["shortcutToken"] = prev["shortcutToken"].strip()
+                if prev.get("shortcutTokenUpdatedAt"):
+                    record["shortcutTokenUpdatedAt"] = prev["shortcutTokenUpdatedAt"]
             _write_json_atomic(self.auth_file, record)
             if clear_sessions:
                 conn = self._connect()
@@ -510,6 +515,10 @@ class AuthManager:
                 "tokenKey": token_key,
                 "updatedAt": int(time.time()),
             }
+            if isinstance(record.get("shortcutToken"), str) and record["shortcutToken"].strip():
+                updated["shortcutToken"] = record["shortcutToken"].strip()
+                if record.get("shortcutTokenUpdatedAt"):
+                    updated["shortcutTokenUpdatedAt"] = record["shortcutTokenUpdatedAt"]
             _write_json_atomic(self.auth_file, updated)
 
             conn = self._connect()
@@ -532,3 +541,45 @@ class AuthManager:
                 "message": "登录凭据已更新，所有历史会话已失效",
                 **session,
             }
+
+    def get_shortcut_token(self, *, create: bool = True) -> str | None:
+        with self.lock:
+            record = self._read_record_locked()
+            if record is None:
+                return None
+            existing = record.get("shortcutToken")
+            if isinstance(existing, str) and existing.strip():
+                return existing.strip()
+            if not create:
+                return None
+            token = secrets.token_urlsafe(32)
+            record["shortcutToken"] = token
+            record["shortcutTokenUpdatedAt"] = int(time.time())
+            _write_json_atomic(self.auth_file, record)
+            return token
+
+    def rotate_shortcut_token(self) -> str | None:
+        with self.lock:
+            record = self._read_record_locked()
+            if record is None:
+                return None
+            token = secrets.token_urlsafe(32)
+            record["shortcutToken"] = token
+            record["shortcutTokenUpdatedAt"] = int(time.time())
+            _write_json_atomic(self.auth_file, record)
+            return token
+
+    def validate_shortcut_token(self, raw_token: str | None) -> dict | None:
+        if not isinstance(raw_token, str):
+            return None
+        candidate = raw_token.strip()
+        if not candidate:
+            return None
+        with self.lock:
+            record = self._read_record_locked()
+            if record is None:
+                return None
+            stored = str(record.get("shortcutToken") or "").strip()
+            if stored and hmac.compare_digest(candidate, stored):
+                return {"username": str(record["username"]), "via": "shortcut_token"}
+            return None
