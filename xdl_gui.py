@@ -378,8 +378,25 @@ def _extract_cmd_user(token: str) -> str | None:
     return None
 
 
-def _expand_short_url(url: str) -> str:
+def _resolve_proxy_from_settings(settings: dict) -> tuple[str | None, str]:
+    """Resolve (proxy_addr, proxy_mode) from current settings."""
+    mode = str(settings.get("proxyMode") or "off").lower()
+    proxy = None
+    if mode == "manual":
+        proxy = settings.get("proxyAddr")
+    elif mode == "auto" and xdl.default_proxy_available():
+        proxy = xdl.DEFAULT_PROXY
+    return (proxy or None), mode
+
+
+def _expand_short_url(url: str, *, proxy: str | None = None, proxy_mode: str = "off") -> str:
     """Resolve shortener links such as https://t.co/... to their canonical destination."""
+    if proxy and str(proxy).lower().startswith(("http://", "https://")):
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    elif proxy_mode == "off":
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    else:
+        opener = urllib.request.build_opener()
     for method in ("HEAD", "GET"):
         try:
             req = urllib.request.Request(
@@ -387,7 +404,7 @@ def _expand_short_url(url: str) -> str:
                 headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"},
                 method=method,
             )
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with opener.open(req, timeout=5) as resp:
                 resolved = str(resp.geturl() or "").strip()
                 if resolved:
                     return resolved
@@ -403,7 +420,7 @@ def _expand_short_url(url: str) -> str:
     return url
 
 
-def _parse_shortcut_input(raw: str) -> dict:
+def _parse_shortcut_input(raw: str, *, proxy: str | None = None, proxy_mode: str = "off") -> dict:
     """Extract and classify an X/Twitter profile URL, tweet URL, or @username."""
     text = str(raw or "").strip()
     if not text:
@@ -415,7 +432,7 @@ def _parse_shortcut_input(raw: str) -> dict:
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower()
         if host in {"t.co", "www.t.co"}:
-            url = _expand_short_url(url)
+            url = _expand_short_url(url, proxy=proxy, proxy_mode=proxy_mode)
             parsed = urlparse(url)
             host = (parsed.hostname or "").lower()
         if host not in SHORTCUT_X_HOSTS:
@@ -1419,6 +1436,7 @@ class AppState:
             wanted = {u.lower() for u in targets}
             for item in self.queue:
                 if item.get("taskKind", "account") != "tweet" and item["user"].lower() in wanted:
+                    item.pop("settingsOverride", None)
                     item["filterSummary"] = filt_label
                     if item.get("status") in {"done", "failed", "paused"}:
                         item["status"] = "waiting"
@@ -1438,14 +1456,22 @@ class AppState:
 
     # ---------- scheduling ----------
 
+    def _effective_item_settings_locked(self, item: dict) -> dict:
+        settings = dict(self.settings)
+        override = item.get("settingsOverride")
+        if isinstance(override, dict) and override:
+            settings.update(override)
+        return settings
+
     def start(self, *, requeue_done: bool = True, resume_paused: bool = True) -> None:
         with self.lock:
             filt_label = describe_filter(self.settings)
             for item in self.queue:
                 if resume_paused and item.get("status") == "paused":
                     item["status"] = "waiting"
-                    item["filterSummary"] = filt_label
+                    item["filterSummary"] = describe_filter(self._effective_item_settings_locked(item))
                 elif requeue_done and item.get("status") == "done":
+                    item.pop("settingsOverride", None)
                     item["status"] = "waiting"
                     item["progress"] = 0
                     item["error"] = None
@@ -1534,7 +1560,7 @@ class AppState:
         for failure in self.failures:
             if failure["id"] in failure_ids:
                 failure["status"] = "queued"
-        settings = dict(self.settings)
+        settings = self._effective_item_settings_locked(item)
         item["filterSummary"] = describe_filter(settings)
         user = item["user"]
         item_id = item["id"]
@@ -1600,11 +1626,12 @@ class AppState:
                     continue
                 groups.setdefault(failure.get("tweetId") or None, []).append(failure_id)
             for tweet_id, ids in groups.items():
-                target = (
-                    f"https://x.com/{user}/status/{tweet_id}"
-                    if tweet_id else
-                    f"https://x.com/{user}" + ("/media" if settings["mediaOnly"] else "")
-                )
+                if tweet_id:
+                    target = f"https://x.com/{user}/status/{tweet_id}"
+                elif task_kind == "tweet" and target_url:
+                    target = target_url
+                else:
+                    target = f"https://x.com/{user}" + ("/media" if settings["mediaOnly"] else "")
                 targets.append((target, ids))
         elif task_kind == "tweet" and target_url:
             targets.append((target_url, []))
@@ -1767,11 +1794,7 @@ class AppState:
                 return None, None, f"Cookie 文件不存在: {cookies}"
             cookies_config = str(cookies)
 
-        proxy = None
-        if settings.get("proxyMode") == "manual":
-            proxy = settings.get("proxyAddr")
-        elif settings.get("proxyMode") == "auto" and xdl.default_proxy_available():
-            proxy = xdl.DEFAULT_PROXY
+        proxy, _ = _resolve_proxy_from_settings(settings)
         return cookies_config, proxy, None
 
     def _run_gallery(
@@ -2129,7 +2152,10 @@ class AppState:
 
     def inspect_shortcut_url(self, raw_url: str, *, use_cache: bool = True) -> dict:
         """Analyze a shared X link so iOS Shortcuts knows whether to prompt for scope."""
-        parsed = _parse_shortcut_input(raw_url)
+        with self.lock:
+            settings = dict(self.settings)
+        proxy, proxy_mode = _resolve_proxy_from_settings(settings)
+        parsed = _parse_shortcut_input(raw_url, proxy=proxy, proxy_mode=proxy_mode)
         if parsed["kind"] == "account":
             target_user = parsed["targetUser"]
             return {
@@ -2159,9 +2185,6 @@ class AppState:
             cached = self._get_cached_shortcut_inspect(tweet_id)
             if cached is not None:
                 return cached
-
-        with self.lock:
-            settings = dict(self.settings)
 
         probe = self._probe_tweet_with_gallery_dl(parsed["url"], settings)
         tweets = probe.get("tweets") or {}
@@ -2264,7 +2287,10 @@ class AppState:
         duration_choice = str(payload.get("durationChoice") or "").strip()
         custom_duration = str(payload.get("customDuration") or "").strip()
 
-        parsed = _parse_shortcut_input(raw_url)
+        with self.lock:
+            base_settings = dict(self.settings)
+        proxy, proxy_mode = _resolve_proxy_from_settings(base_settings)
+        parsed = _parse_shortcut_input(raw_url, proxy=proxy, proxy_mode=proxy_mode)
         dur_enabled, max_dur = _parse_shortcut_duration(duration_choice, custom_duration)
 
         settings_patch: dict = {
@@ -2273,8 +2299,7 @@ class AppState:
         }
         if dur_enabled:
             settings_patch["maxVideoDuration"] = int(max_dur)
-        self.update_settings(settings_patch)
-        filt_label = describe_filter(self.settings)
+        filt_label = describe_filter({**base_settings, **settings_patch})
 
         want_single_tweet = parsed["kind"] == "tweet" and (
             scope_choice.startswith("只下载")
@@ -2288,22 +2313,48 @@ class AppState:
         handle_match = re.search(r"@([A-Za-z0-9_]{1,15})", scope_choice)
         chosen_handle = handle_match.group(1) if handle_match else ""
 
+        single_tweet_id = ""
+        single_url = ""
+        include_quoted = False
+
         if want_single_tweet:
             if inspected is None and not parsed.get("urlUser"):
                 inspected = self.inspect_shortcut_url(raw_url)
             if inspected is not None:
                 target_user = inspected.get("singleTargetUser") or inspected.get("targetUser")
-                single_tweet_id = inspected.get("singleTargetTweetId") or parsed["tweetId"]
+                single_tweet_id = str(inspected.get("singleTargetTweetId") or parsed["tweetId"])
                 single_url = inspected.get("singleTargetUrl") or parsed["url"]
                 include_quoted = bool(inspected.get("singleIncludeQuoted"))
             else:
                 target_user = parsed.get("urlUser") or chosen_handle
-                single_tweet_id = parsed["tweetId"]
+                single_tweet_id = str(parsed["tweetId"])
                 single_url = f"https://x.com/{target_user}/status/{single_tweet_id}" if target_user else parsed["url"]
                 include_quoted = True
             if not target_user or not USER_RE.fullmatch(str(target_user)):
                 raise ValueError("无法识别推文所属博主用户名")
+        else:
+            if parsed["kind"] == "account":
+                target_user = parsed["targetUser"]
+            elif chosen_handle and USER_RE.fullmatch(chosen_handle):
+                target_user = chosen_handle
+            elif inspected and inspected.get("targetUser"):
+                target_user = inspected["targetUser"]
+            elif parsed.get("urlUser"):
+                target_user = parsed["urlUser"]
+            else:
+                inspected = self.inspect_shortcut_url(raw_url)
+                target_user = inspected.get("targetUser") or ""
 
+            if not target_user or not USER_RE.fullmatch(str(target_user)):
+                raise ValueError("无法识别博主用户名")
+
+        # Update global settings only after link resolution & validation succeed
+        self.update_settings(settings_patch)
+
+        with self.lock:
+            was_paused = bool(self.paused)
+
+        if want_single_tweet:
             with self.lock:
                 existing_item = next(
                     (
@@ -2317,6 +2368,7 @@ class AppState:
                     existing_item["user"] = target_user
                     existing_item["targetUrl"] = single_url
                     existing_item["includeQuoted"] = include_quoted
+                    existing_item["settingsOverride"] = dict(settings_patch)
                     existing_item["filterSummary"] = filt_label
                     existing_item["displayNote"] = "单条推文"
                     if existing_item.get("status") != "active":
@@ -2332,6 +2384,7 @@ class AppState:
                         "tweetId": str(single_tweet_id),
                         "targetUrl": single_url,
                         "includeQuoted": include_quoted,
+                        "settingsOverride": dict(settings_patch),
                         "displayNote": "单条推文",
                         "user": target_user,
                         "status": "waiting",
@@ -2363,25 +2416,11 @@ class AppState:
                 )
                 self.mark_dirty()
         else:
-            if parsed["kind"] == "account":
-                target_user = parsed["targetUser"]
-            elif chosen_handle and USER_RE.fullmatch(chosen_handle):
-                target_user = chosen_handle
-            elif inspected and inspected.get("targetUser"):
-                target_user = inspected["targetUser"]
-            elif parsed.get("urlUser"):
-                target_user = parsed["urlUser"]
-            else:
-                inspected = self.inspect_shortcut_url(raw_url)
-                target_user = inspected.get("targetUser") or ""
-
-            if not target_user or not USER_RE.fullmatch(str(target_user)):
-                raise ValueError("无法识别博主用户名")
-
             self.add_users([target_user])
             with self.lock:
                 for item in self.queue:
                     if item.get("taskKind", "account") != "tweet" and item["user"].lower() == target_user.lower():
+                        item["settingsOverride"] = dict(settings_patch)
                         item["filterSummary"] = filt_label
                         if item.get("status") in {"done", "failed", "paused"}:
                             item["status"] = "waiting"
@@ -2397,19 +2436,27 @@ class AppState:
                 )
                 self.mark_dirty()
 
-        self.start(requeue_done=False, resume_paused=False)
+        if not was_paused:
+            self.start(requeue_done=False, resume_paused=False)
 
         dur_text = f"视频 ≤ {xdl.format_duration(max_dur)}" if dur_enabled else "视频不限时长"
         mode_text = "单条推文" if want_single_tweet else "全部媒体"
+        if was_paused:
+            title = "XDL 已加入队列（暂停中）"
+            message = f"@{target_user}（{mode_text} · 图片 + {dur_text}）已加入队列，调度暂停中"
+        else:
+            title = "XDL 已加入下载队列"
+            message = f"@{target_user}（{mode_text} · 图片 + {dur_text}）已开始后台下载"
         return {
             "ok": True,
             "status": "success",
             "mode": "tweet" if want_single_tweet else "account",
             "user": target_user,
             "tweetId": str(single_tweet_id) if want_single_tweet else None,
+            "paused": was_paused,
             "filterSummary": filt_label or "图片 + 视频（不限时长）",
-            "title": "XDL 已加入下载队列",
-            "message": f"@{target_user}（{mode_text} · 图片 + {dur_text}）已开始后台下载",
+            "title": title,
+            "message": message,
             "state": self.snapshot(),
         }
 
@@ -2534,7 +2581,7 @@ class AppState:
             item["progress"] = 0
             item["error"] = None
             item["retried"] = True
-            item["filterSummary"] = describe_filter(self.settings)
+            item["filterSummary"] = describe_filter(self._effective_item_settings_locked(item))
             self.running = True
             self.paused = False
             if self.started_at is None:
