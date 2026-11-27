@@ -36,7 +36,7 @@
     </div>
 
     <div class="shortcut-endpoint-item">
-      <span class="shortcut-endpoint-label">当前服务器地址（安装引导第 1 题粘贴）</span>
+      <span class="shortcut-endpoint-label">当前服务器地址（添加到快捷指令后粘贴到第 1 个文本框）</span>
       <div class="code-copy-row">
         <code class="mono" id="landing-server-origin"></code>
         <button class="btn ghost btn-sm" id="btn-copy-landing-origin" type="button">复制地址</button>
@@ -44,8 +44,8 @@
     </div>
 
     <ol class="shortcut-steps shortcut-install-steps">
-      <li><strong>下载并添加</strong>：点击上方按钮下载安装包，在 Safari 右上角（或底部）点击下载图标打开并点<strong>添加快捷指令</strong>。</li>
-      <li><strong>完成导入提问</strong>：按屏幕提示填入<strong>服务器地址</strong>（可点上方一键复制）和你的 <strong>Shortcut API Token</strong>（无密码模式可留空）。</li>
+      <li><strong>下载并添加</strong>：点击上方按钮下载安装包，在 Safari 下载列表中打开“XDL下载.shortcut”并直接点<strong>添加快捷指令</strong>（已移除易在 iOS 18.5+ / iOS 26 卡死的导入提问页）。</li>
+      <li><strong>粘贴地址与 Token</strong>：在「快捷指令」App 点 <strong>XDL下载</strong> 右上角 <strong>…</strong> 编辑，将上方<strong>服务器地址</strong>（含 <code>http://</code> 或 <code>https://</code>）和控制台的 <strong>Shortcut API Token</strong>（无密码模式留空）粘贴到顶部前两个「文本」框，点<strong>完成</strong>。</li>
       <li><strong>在 X 中直接分享使用</strong>：浏览推文或博主主页时点 <strong>分享 → XDL 下载</strong>，弹出视频时长限制框并自动派发到服务器（引用转发会自动询问单条或原作者全部媒体）。</li>
     </ol>
 
@@ -54,7 +54,7 @@
     </div>
 
     <div class="login-foot">
-      <span class="mono">iOS 15 – 18 · 图片+视频默认下载</span>
+      <span class="mono">iOS 15 – 26 · 图片+视频默认下载</span>
       <span>支持剪贴板自动兜底</span>
     </div>
   </section>
@@ -75,11 +75,17 @@
   function legacyCopy(text) {
     var ta = document.createElement("textarea");
     ta.value = text;
-    ta.setAttribute("readonly", "");
     ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.left = "-9999px";
+    ta.style.fontSize = "16px";
     ta.style.opacity = "0";
     document.body.appendChild(ta);
+    ta.focus();
     ta.select();
+    try {
+      ta.setSelectionRange(0, text.length);
+    } catch (_) {}
     try {
       if (document.execCommand("copy")) markCopied();
     } catch (_) {}
@@ -89,7 +95,7 @@
   if (copyBtn) {
     copyBtn.addEventListener("click", function () {
       if (!origin) return;
-      if (navigator.clipboard && navigator.clipboard.writeText) {
+      if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
         navigator.clipboard.writeText(origin).then(markCopied).catch(function () {
           legacyCopy(origin);
         });

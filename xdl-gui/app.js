@@ -2771,12 +2771,39 @@ function restoreFocus(element) {
 
 /* ---------- iOS Shortcut Setup Card ---------- */
 
+function legacyCopyText(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.top = "0";
+  ta.style.left = "-9999px";
+  ta.style.fontSize = "16px";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try {
+    ta.setSelectionRange(0, text.length);
+  } catch {}
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {}
+  document.body.removeChild(ta);
+  return ok;
+}
+
 function copyTextWithToast(text, okMsg) {
   if (!text) { toast("暂无可复制内容", "warn"); return; }
-  if (navigator.clipboard && navigator.clipboard.writeText) {
+  if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
     navigator.clipboard.writeText(text)
       .then(() => toast(okMsg || "已复制", "ok"))
-      .catch(() => toast(text, "info"));
+      .catch(() => {
+        if (legacyCopyText(text)) toast(okMsg || "已复制", "ok");
+        else toast(text, "info");
+      });
+  } else if (legacyCopyText(text)) {
+    toast(okMsg || "已复制", "ok");
   } else {
     toast(text, "info");
   }
