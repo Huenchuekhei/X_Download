@@ -541,6 +541,15 @@
             <span class="tag tag-ok" id="shortcut-status-tag">已就绪</span>
           </div>
           <div class="panel-body">
+            <div class="shortcut-install-cta">
+              <a class="btn primary btn-sm wide" id="btn-download-shortcut" href="/shortcut/XDL.shortcut">一键获取 XDL 快捷指令（.shortcut）</a>
+              <div class="btnrow">
+                <button class="btn ghost btn-sm" id="btn-copy-shortcut-link" type="button">复制一键安装链接</button>
+                <button class="btn ghost btn-sm" id="btn-copy-shortcut-origin" type="button">复制服务器地址</button>
+              </div>
+              <p class="fieldnote">像 TVDL 一样点开安装页面即可添加；添加时按提示粘贴服务器地址与下方 Token 即可使用（免 Mac、免手动拼装）。</p>
+            </div>
+
             <div class="field" id="shortcut-token-wrap">
               <label for="shortcut-token-input">Shortcut API Token（填在标头 X-XDL-Token）</label>
               <div class="pw-wrap">
@@ -575,7 +584,7 @@
             </div>
 
             <details class="cmd-preview shortcut-guide">
-              <summary>iPhone 搭建步骤（免 Mac · 约 2 分钟）</summary>
+              <summary>手动搭建步骤（备用）</summary>
               <ol class="shortcut-steps">
                 <li><strong>新建快捷指令</strong>：命名“XDL 下载”，开启<strong>在共享表单中显示</strong>，仅选 <strong>URL</strong> 和 <strong>文本</strong>，无输入时设为<strong>从剪贴板获取</strong>。</li>
                 <li><strong>保存令牌</strong>：添加<strong>文本</strong>动作并粘贴上方 Token（若需点击复制关键字段名，请使用下方一键复制芯片）。</li>

@@ -1539,6 +1539,56 @@ body[data-view="logs"] .roundbar {
 .ck-pane { display: flex; flex-direction: column; gap: var(--s-3); }
 
 /* iOS Shortcut Card */
+.shortcut-install-cta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--p-surface-2);
+}
+.shortcut-install-steps {
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.shortcut-landing-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.shortcut-card-landing {
+  width: min(100%, 460px);
+}
+.shortcut-card-landing .login-brand {
+  align-items: center;
+  gap: var(--s-2);
+}
+.shortcut-card-landing .tb-brand {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.shortcut-card-landing .tb-titles {
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 3px var(--s-2);
+}
+.shortcut-card-landing .tb-title {
+  white-space: nowrap;
+}
+.shortcut-card-landing .tb-sub {
+  white-space: normal;
+}
+.shortcut-card-landing .tag {
+  flex: none;
+  white-space: nowrap;
+}
+.btn.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
 .shortcut-endpoints {
   display: flex;
   flex-direction: column;

@@ -2160,6 +2160,7 @@ class AppState:
             target_user = parsed["targetUser"]
             return {
                 "ok": True,
+                "status": "ok",
                 "kind": "account",
                 "url": parsed["url"],
                 "targetUser": target_user,
@@ -2257,6 +2258,7 @@ class AppState:
 
         result = {
             "ok": True,
+            "status": "ok",
             "kind": "tweet",
             "url": parsed["url"],
             "targetUser": preferred_creator,
@@ -3749,10 +3751,55 @@ class Handler(SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return
 
+    def _serve_shortcut_file(self, *, head_only: bool = False) -> None:
+        target = (APP_DIR / "xdl-download.shortcut").resolve()
+        try:
+            if not target.is_relative_to(APP_DIR.resolve()) or not target.is_file():
+                if head_only:
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                else:
+                    self._json({"ok": False, "error": "快捷指令安装包尚未构建，请运行 scripts/build_ios_shortcut.py"}, 404)
+                return
+            data = target.read_bytes()
+        except OSError:
+            if head_only:
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            else:
+                self._json({"ok": False, "error": "无法读取快捷指令安装包"}, 500)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header(
+            "Content-Disposition",
+            'attachment; filename="XDL.shortcut"; filename*=UTF-8\'\'XDL%E4%B8%8B%E8%BD%BD.shortcut',
+        )
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if head_only:
+            return
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+
     def do_HEAD(self):
         parsed = urlparse(self.path)
-        route = parsed.path
-        if self.app.auth_required and route not in {"/login", "/login.html", "/styles.css", "/login.js", "/api/health"}:
+        route = re.sub(r"/+", "/", parsed.path)
+        if route == "/shortcut/XDL.shortcut":
+            self._serve_shortcut_file(head_only=True)
+            return
+        public_routes = {
+            "/login", "/login.html", "/shortcut", "/shortcut.html",
+            "/shortcut/XDL.shortcut", "/styles.css", "/login.js", "/api/health",
+        }
+        if self.app.auth_required and route not in public_routes:
             if self._current_session() is None:
                 if route in {"/", "/index.html"}:
                     self._redirect("/login")
@@ -3764,12 +3811,22 @@ class Handler(SimpleHTTPRequestHandler):
                 return
         if route in {"/login", "/login.html"}:
             self.path = "/login.html"
+        elif route in {"/shortcut", "/shortcut.html"}:
+            self.path = "/shortcut.html"
         super().do_HEAD()
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        route = parsed.path
+        route = re.sub(r"/+", "/", parsed.path)
         query = parse_qs(parsed.query)
+
+        if route == "/shortcut/XDL.shortcut":
+            self._serve_shortcut_file(head_only=False)
+            return
+        if route in {"/shortcut", "/shortcut.html"}:
+            self.path = "/shortcut.html"
+            super().do_GET()
+            return
 
         if route == "/api/health":
             if self.app.auth_required:
@@ -3824,6 +3881,9 @@ class Handler(SimpleHTTPRequestHandler):
         if route == "/api/state":
             self._json(self.app.snapshot())
             return
+        if route == "/api/shortcut/download":
+            self._serve_shortcut_file(head_only=False)
+            return
         if route == "/api/shortcut/config":
             token = self.app.auth.get_shortcut_token(create=True) if self.app.auth_required else ""
             self._json({
@@ -3832,6 +3892,9 @@ class Handler(SimpleHTTPRequestHandler):
                 "token": token or "",
                 "inspectPath": "/api/shortcut/inspect",
                 "submitPath": "/api/shortcut/submit",
+                "installPath": "/shortcut",
+                "downloadPath": "/shortcut/XDL.shortcut",
+                "shortcutFileReady": (APP_DIR / "xdl-download.shortcut").is_file(),
                 "durationOptions": list(SHORTCUT_DURATION_OPTIONS),
             })
             return
@@ -3998,7 +4061,7 @@ class Handler(SimpleHTTPRequestHandler):
                     pass
 
     def do_POST(self):
-        route = urlparse(self.path).path
+        route = re.sub(r"/+", "/", urlparse(self.path).path)
         payload = self._body()
         try:
             if route == "/api/auth/login":
