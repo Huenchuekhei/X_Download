@@ -113,29 +113,45 @@ def build_shortcut_plist() -> dict:
     """Build the XML-serializable Apple Shortcuts workflow dictionary."""
     u_server = _uid("action-server")
     u_token = _uid("action-token")
+    g_cfg_default = _uid("group-cfg-default")
+    u_cfg_default_end = _uid("action-cfg-default-end")
+    g_cfg_scheme = _uid("group-cfg-scheme")
+    u_cfg_scheme_end = _uid("action-cfg-scheme-end")
+    u_inspect_url = _uid("action-inspect-url")
     u_inspect = _uid("action-inspect")
     u_inspect_dict = _uid("action-inspect-dict")
     u_status = _uid("action-status")
     g_err = _uid("group-err")
     u_err_title = _uid("action-err-title")
     u_err_msg = _uid("action-err-msg")
+    u_err_end = _uid("action-err-end")
     u_is_quote = _uid("action-is-quote")
     g_quote = _uid("group-quote")
     u_scope_opts = _uid("action-scope-opts")
     u_choose_scope = _uid("action-choose-scope")
     u_empty_scope = _uid("action-empty-scope")
+    u_quote_end = _uid("action-quote-end")
     u_dur_opts = _uid("action-dur-opts")
     u_choose_dur = _uid("action-choose-dur")
     g_custom = _uid("group-custom")
     u_ask_custom = _uid("action-ask-custom")
     u_empty_custom = _uid("action-empty-custom")
+    u_custom_end = _uid("action-custom-end")
+    u_submit_url = _uid("action-submit-url")
     u_submit = _uid("action-submit")
     u_submit_dict = _uid("action-submit-dict")
     u_sub_title = _uid("action-sub-title")
     u_sub_msg = _uid("action-sub-msg")
 
     actions = [
-        # 0: Server Base URL (Import Question #1)
+        # 0: Comment guiding Server Base URL setup
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.comment",
+            "WFWorkflowActionParameters": {
+                "WFCommentActionText": "① 粘贴 XDL 服务器地址（含 http:// 或 https://，例如 http://1.2.3.4:8765）",
+            },
+        },
+        # 1: Server Base URL
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
             "WFWorkflowActionParameters": {
@@ -143,7 +159,14 @@ def build_shortcut_plist() -> dict:
                 "WFTextActionText": "https://",
             },
         },
-        # 1: Shortcut API Token (Import Question #2)
+        # 2: Comment guiding Shortcut API Token setup
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.comment",
+            "WFWorkflowActionParameters": {
+                "WFCommentActionText": "② 粘贴 Shortcut API Token（在 XDL 网页端「iOS 快捷指令」一键复制；免密码模式留空）",
+            },
+        },
+        # 3: Shortcut API Token
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
             "WFWorkflowActionParameters": {
@@ -151,7 +174,80 @@ def build_shortcut_plist() -> dict:
                 "WFTextActionText": "",
             },
         },
-        # 2: POST /api/shortcut/inspect
+        # 4..7: Early-exit if Server Base URL is still the unconfigured default "https://"
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+            "WFWorkflowActionParameters": {
+                "GroupingIdentifier": g_cfg_default,
+                "WFCondition": 4,
+                "WFConditionalActionString": "https://",
+                "WFControlFlowMode": 0,
+                "WFInput": _conditional_string_input(u_server, "文本"),
+            },
+        },
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.notification",
+            "WFWorkflowActionParameters": {
+                "WFNotificationActionSound": True,
+                "WFNotificationActionTitle": "XDL 下载尚未配置",
+                "WFNotificationActionBody": "请点快捷指令右上角「…」进入编辑，在顶部文本框粘贴服务器地址（含 http:// 或 https://）与 Token",
+            },
+        },
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.exit",
+            "WFWorkflowActionParameters": {},
+        },
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+            "WFWorkflowActionParameters": {
+                "GroupingIdentifier": g_cfg_default,
+                "UUID": u_cfg_default_end,
+                "WFControlFlowMode": 2,
+            },
+        },
+        # 8..11: Early-exit if Server Base URL is missing "://"
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+            "WFWorkflowActionParameters": {
+                "GroupingIdentifier": g_cfg_scheme,
+                "WFCondition": 999,
+                "WFConditionalActionString": "://",
+                "WFControlFlowMode": 0,
+                "WFInput": _conditional_string_input(u_server, "文本"),
+            },
+        },
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.notification",
+            "WFWorkflowActionParameters": {
+                "WFNotificationActionSound": True,
+                "WFNotificationActionTitle": "XDL 服务器地址格式错误",
+                "WFNotificationActionBody": "请在快捷指令顶部第一个文本框填写完整地址（必须包含 http:// 或 https://）",
+            },
+        },
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.exit",
+            "WFWorkflowActionParameters": {},
+        },
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+            "WFWorkflowActionParameters": {
+                "GroupingIdentifier": g_cfg_scheme,
+                "UUID": u_cfg_scheme_end,
+                "WFControlFlowMode": 2,
+            },
+        },
+        # 12: Build Inspect URL explicitly to avoid Rich Text coercion errors
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.url",
+            "WFWorkflowActionParameters": {
+                "UUID": u_inspect_url,
+                "WFURLActionURL": _token_string_with_suffix(
+                    _action_output(u_server, "文本"),
+                    "/api/shortcut/inspect",
+                ),
+            },
+        },
+        # 13: POST /api/shortcut/inspect
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
             "WFWorkflowActionParameters": {
@@ -159,10 +255,7 @@ def build_shortcut_plist() -> dict:
                 "ShowHeaders": True,
                 "WFHTTPBodyType": "JSON",
                 "WFHTTPMethod": "POST",
-                "WFURL": _token_string_with_suffix(
-                    _action_output(u_server, "文本"),
-                    "/api/shortcut/inspect",
-                ),
+                "WFURL": _token_string_single(_action_output(u_inspect_url, "URL")),
                 "WFHTTPHeaders": {
                     "Value": {
                         "WFDictionaryFieldValueItems": [
@@ -181,7 +274,7 @@ def build_shortcut_plist() -> dict:
                 },
             },
         },
-        # 3: Parse JSON response as Dictionary
+        # 14: Parse JSON response as Dictionary
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.detect.dictionary",
             "WFWorkflowActionParameters": {
@@ -189,16 +282,17 @@ def build_shortcut_plist() -> dict:
                 "WFInput": _token_attachment(_action_output(u_inspect, "URL 的内容")),
             },
         },
-        # 4: Read inspect status
+        # 15: Read inspect status
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
             "WFWorkflowActionParameters": {
                 "UUID": u_status,
+                "WFGetDictionaryValueType": "Value",
                 "WFDictionaryKey": "status",
                 "WFInput": _token_attachment(_action_output(u_inspect_dict, "词典")),
             },
         },
-        # 5..9: If inspect failed ("status" == "error"), notify & stop early
+        # 16..21: If inspect failed ("status" == "error"), notify & stop early
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
             "WFWorkflowActionParameters": {
@@ -213,6 +307,7 @@ def build_shortcut_plist() -> dict:
             "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
             "WFWorkflowActionParameters": {
                 "UUID": u_err_title,
+                "WFGetDictionaryValueType": "Value",
                 "WFDictionaryKey": "title",
                 "WFInput": _token_attachment(_action_output(u_inspect_dict, "词典")),
             },
@@ -221,6 +316,7 @@ def build_shortcut_plist() -> dict:
             "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
             "WFWorkflowActionParameters": {
                 "UUID": u_err_msg,
+                "WFGetDictionaryValueType": "Value",
                 "WFDictionaryKey": "message",
                 "WFInput": _token_attachment(_action_output(u_inspect_dict, "词典")),
             },
@@ -241,19 +337,21 @@ def build_shortcut_plist() -> dict:
             "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
             "WFWorkflowActionParameters": {
                 "GroupingIdentifier": g_err,
+                "UUID": u_err_end,
                 "WFControlFlowMode": 2,
             },
         },
-        # 11: Read isQuote ("yes" | "no")
+        # 22: Read isQuote ("yes" | "no")
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
             "WFWorkflowActionParameters": {
                 "UUID": u_is_quote,
+                "WFGetDictionaryValueType": "Value",
                 "WFDictionaryKey": "isQuote",
                 "WFInput": _token_attachment(_action_output(u_inspect_dict, "词典")),
             },
         },
-        # 12..19: If Quote Tweet, show 2-option scope picker; otherwise set empty scope
+        # 23..30: If Quote Tweet, show 2-option scope picker; otherwise set empty scope
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
             "WFWorkflowActionParameters": {
@@ -268,6 +366,7 @@ def build_shortcut_plist() -> dict:
             "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
             "WFWorkflowActionParameters": {
                 "UUID": u_scope_opts,
+                "WFGetDictionaryValueType": "Value",
                 "WFDictionaryKey": "scopeOptions",
                 "WFInput": _token_attachment(_action_output(u_inspect_dict, "词典")),
             },
@@ -312,14 +411,16 @@ def build_shortcut_plist() -> dict:
             "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
             "WFWorkflowActionParameters": {
                 "GroupingIdentifier": g_quote,
+                "UUID": u_quote_end,
                 "WFControlFlowMode": 2,
             },
         },
-        # 20..21: Prompt video duration limit options (images always included)
+        # 31..32: Prompt video duration limit options (images always included)
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
             "WFWorkflowActionParameters": {
                 "UUID": u_dur_opts,
+                "WFGetDictionaryValueType": "Value",
                 "WFDictionaryKey": "durationOptions",
                 "WFInput": _token_attachment(_action_output(u_inspect_dict, "词典")),
             },
@@ -332,7 +433,7 @@ def build_shortcut_plist() -> dict:
                 "WFInput": _token_attachment(_action_output(u_dur_opts, "词典值")),
             },
         },
-        # 22..28: If "自定义时长" chosen, ask user for custom duration text
+        # 33..39: If "自定义时长" chosen, ask user for custom duration text
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
             "WFWorkflowActionParameters": {
@@ -383,10 +484,22 @@ def build_shortcut_plist() -> dict:
             "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
             "WFWorkflowActionParameters": {
                 "GroupingIdentifier": g_custom,
+                "UUID": u_custom_end,
                 "WFControlFlowMode": 2,
             },
         },
-        # 29: POST /api/shortcut/submit
+        # 40: Build Submit URL explicitly to avoid Rich Text coercion errors
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.url",
+            "WFWorkflowActionParameters": {
+                "UUID": u_submit_url,
+                "WFURLActionURL": _token_string_with_suffix(
+                    _action_output(u_server, "文本"),
+                    "/api/shortcut/submit",
+                ),
+            },
+        },
+        # 41: POST /api/shortcut/submit
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
             "WFWorkflowActionParameters": {
@@ -394,10 +507,7 @@ def build_shortcut_plist() -> dict:
                 "ShowHeaders": True,
                 "WFHTTPBodyType": "JSON",
                 "WFHTTPMethod": "POST",
-                "WFURL": _token_string_with_suffix(
-                    _action_output(u_server, "文本"),
-                    "/api/shortcut/submit",
-                ),
+                "WFURL": _token_string_single(_action_output(u_submit_url, "URL")),
                 "WFHTTPHeaders": {
                     "Value": {
                         "WFDictionaryFieldValueItems": [
@@ -419,7 +529,7 @@ def build_shortcut_plist() -> dict:
                 },
             },
         },
-        # 30..33: Parse submit response and show notification
+        # 42..45: Parse submit response and show notification
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.detect.dictionary",
             "WFWorkflowActionParameters": {
@@ -431,6 +541,7 @@ def build_shortcut_plist() -> dict:
             "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
             "WFWorkflowActionParameters": {
                 "UUID": u_sub_title,
+                "WFGetDictionaryValueType": "Value",
                 "WFDictionaryKey": "title",
                 "WFInput": _token_attachment(_action_output(u_submit_dict, "词典")),
             },
@@ -439,6 +550,7 @@ def build_shortcut_plist() -> dict:
             "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
             "WFWorkflowActionParameters": {
                 "UUID": u_sub_msg,
+                "WFGetDictionaryValueType": "Value",
                 "WFDictionaryKey": "message",
                 "WFInput": _token_attachment(_action_output(u_submit_dict, "词典")),
             },
@@ -454,6 +566,7 @@ def build_shortcut_plist() -> dict:
     ]
 
     return {
+        "WFQuickActionSurfaces": [],
         "WFQuickLookActionParameters": {},
         "WFWorkflowActions": actions,
         "WFWorkflowClientVersion": "2302.0.4",
@@ -463,22 +576,8 @@ def build_shortcut_plist() -> dict:
             "WFWorkflowIconGlyphNumber": 59771,
             "WFWorkflowIconStartColor": 4274264319,
         },
-        "WFWorkflowImportQuestions": [
-            {
-                "ActionIndex": 0,
-                "Category": "Parameter",
-                "DefaultValue": "https://",
-                "ParameterKey": "WFTextActionText",
-                "Text": "粘贴你的 XDL 服务器地址（含 http:// 或 https://，可在网页端「iOS 快捷指令」一键复制）",
-            },
-            {
-                "ActionIndex": 1,
-                "Category": "Parameter",
-                "DefaultValue": "",
-                "ParameterKey": "WFTextActionText",
-                "Text": "粘贴 Shortcut API Token（在 XDL 网页端「iOS 快捷指令」复制；免密码模式留空）",
-            },
-        ],
+        # Kept empty intentionally: iOS 18.5+ / iOS 26 hangs on "Add Shortcut" when WFWorkflowImportQuestions is non-empty.
+        "WFWorkflowImportQuestions": [],
         "WFWorkflowInputContentItemClasses": [
             "WFURLContentItem",
             "WFStringContentItem",
